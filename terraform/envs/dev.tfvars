@@ -14,24 +14,19 @@ enable_langsmith   = false
 log_retention_days = 7
 
 # --- Edge -----------------------------------------------------------------------------
-# `alb`, not `cloudfront`, because AWS will not create a distribution on an unverified
-# account and that is a Support case with no API (docs/18 §3.4, ops-log.md).
+# The design docs/08 and docs/09 argue for: an internal ALB reachable only as a CloudFront
+# VPC origin, with TLS from CloudFront's own certificate. The listener has no public
+# address at all.
 #
-# The brief leaves service selection open, so this is a choice rather than a compromise —
-# but it is a real downgrade of one security boundary and docs/09 §6.6 says which. Switch
-# back with a single word once the account clears.
-edge = "alb"
+# **This branch cannot currently be applied.** AWS refuses to create a distribution on an
+# unverified account (docs/18 §3.4, ops-log.md). The `develop` branch runs `edge = "alb"`
+# instead and is what is deployed; switching back is this one word, once the account
+# clears.
+edge = "cloudfront"
 
-# No certificate, so the viewer hop is HTTP. A certificate needs a domain, and an ALB's
-# own *.elb.amazonaws.com name cannot have one. Set this and the listener serves HTTPS on
-# 443 and redirects 80 to it — nothing else changes.
-acm_certificate_arn = ""
-
-# Cognito rejects http:// callbacks for anything but localhost, so an unencrypted edge
-# cannot sign anyone in. With no domain to get a real certificate for, this is what makes
-# the environment usable — at the cost of a browser warning on every first visit.
-# Replace it with a real certificate as soon as there is a domain.
-self_signed_certificate = true
+# Unused under `edge = "cloudfront"` — CloudFront brings its own certificate.
+acm_certificate_arn     = ""
+self_signed_certificate = false
 
 # --- Cost ---------------------------------------------------------------------------
 # Together these remove ~63% of the idle bill: ~$0.26/hour becomes ~$0.09/hour
