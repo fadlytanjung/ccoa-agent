@@ -7,6 +7,11 @@
 # Actions are pinned to a major tag, checked against the registry rather than copied from
 # a tutorial — every version in the first draft of this file was several majors stale, and
 # a stale pin fails on the first run with an error about the runner, not about the pin.
+#
+# Check the **git ref**, not the release name: `astral-sh/setup-uv` publishes releases up
+# to v10 but its newest floating major tag is v7, so `@v10` fails to resolve even though
+# a release by that number exists. `git/ref/tags/<tag>` returning 200 is the only thing
+# that means a pin will work.
 # A hardened setup would pin each to a full commit SHA; major tags are the deliberate
 # trade here, in exchange for security patches arriving without a PR.
 #
@@ -46,7 +51,7 @@ jobs:
       - uses: actions/checkout@v7
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v10
+        uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
           cache-dependency-glob: backend/uv.lock
@@ -116,7 +121,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: astral-sh/setup-uv@v10
+      - uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
           cache-dependency-glob: backend/uv.lock
