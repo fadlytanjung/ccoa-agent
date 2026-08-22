@@ -15,9 +15,21 @@
 #     never approved (docs/00 §5, ADR-006 §2).
 name: Deploy
 
+# **`develop`, not `main`** — and the inversion is deliberate.
+#
+# `main` holds the architecture the design argues for: an internal ALB behind a CloudFront
+# VPC origin. AWS will not create that distribution on an unverified account, so `main` is
+# currently *not deployable* (docs/09 §6.6, ops-log.md). `develop` carries the same
+# Terraform with `edge = "alb"` and is what runs.
+#
+# Both branches point at one state file, so deploying from both means whichever pushed
+# last rewrites the environment in its own image. That nearly happened: a deploy from
+# `main` reached the build step before it was cancelled, and its next action would have
+# been to replace the working internet-facing ALB and then fail at CloudFront — leaving
+# nothing serving. One branch owns the environment; this is that branch.
 on:
   push:
-    branches: [main]
+    branches: [develop]
   workflow_dispatch:
 
 # Never two deploys at once: they would race on the Terraform state lock, and the loser
