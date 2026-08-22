@@ -103,80 +103,52 @@ fi
 step "3/3  Permission boundary and deploy role"
 
 BOUNDARY_ARN="arn:aws:iam::${ACCOUNT_ID}:policy/${BOUNDARY_NAME}"
+
+# The document, once, so create and update cannot drift apart.
+read -r -d '' BOUNDARY_DOC <<JSON || true
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    { "Sid": "AllowServices", "Effect": "Allow", "Action": [
+        "ec2:*", "ecs:*", "ecr:*", "elasticloadbalancing:*", "cloudfront:*",
+        "logs:*", "s3:*", "secretsmanager:*", "cognito-idp:*", "wafv2:*",
+        "application-autoscaling:*", "acm:*", "cloudwatch:*",
+        "iam:PassRole", "iam:GetRole", "iam:CreateRole",
+        "iam:DeleteRole", "iam:AttachRolePolicy", "iam:DetachRolePolicy",
+        "iam:PutRolePolicy", "iam:DeleteRolePolicy", "iam:TagRole", "iam:ListRolePolicies",
+        "iam:ListAttachedRolePolicies", "iam:GetRolePolicy"
+      ], "Resource": "*" },
+    { "Sid": "NeverMintCredentials", "Effect": "Deny", "Action": [
+        "iam:CreateUser", "iam:CreateAccessKey", "iam:CreateLoginProfile",
+        "iam:DeleteUserPolicy", "iam:AttachUserPolicy",
+        "organizations:*", "account:*"
+      ], "Resource": "*" },
+    { "Sid": "NeverEscapeTheBoundary", "Effect": "Deny", "Action": [
+        "iam:DeletePolicy", "iam:DeletePolicyVersion", "iam:CreatePolicyVersion",
+        "iam:SetDefaultPolicyVersion"
+      ], "Resource": "${BOUNDARY_ARN}" }
+  ]
+}
+JSON
+
 if aws iam get-policy --policy-arn "$BOUNDARY_ARN" >/dev/null 2>&1; then
-  pass "boundary already exists"
-else
-  # The ceiling on what any role this pipeline creates can ever do. Denying IAM user and
-  # access-key creation is the important half: it is what stops a compromised pipeline
-  # from minting itself a credential that outlives the incident.
-  aws iam create-policy --policy-name "$BOUNDARY_NAME" --policy-document '{
-    "Version": "2012-10-17",
-    "Statement": [
-      { "Sid": "AllowServices", "Effect": "Allow", "Action": [
-          "ec2:*", "ecs:*", "ecr:*", "elasticloadbalancing:*", "cloudfront:*",
-          "logs:*", "s3:*", "secretsmanager:*", "cognito-idp:*", "wafv2:*",
-          "application-autoscaling:*", "iam:PassRole", "iam:GetRole", "iam:CreateRole",
-          "iam:DeleteRole", "iam:AttachRolePolicy", "iam:DetachRolePolicy",
-          "iam:PutRolePolicy", "iam:DeleteRolePolicy", "iam:TagRole", "iam:ListRolePolicies",
-          "iam:ListAttachedRolePolicies", "iam:GetRolePolicy"
-        ], "Resource": "*" },
-      { "Sid": "NeverMintCredentials", "Effect": "Deny", "Action": [
-          "iam:CreateUser", "iam:CreateAccessKey", "iam:CreateLoginProfile",
-          "iam:DeleteUserPolicy", "iam:AttachUserPolicy",
-          "organizations:*", "account:*"
-        ], "Resource": "*" },
-      { "Sid": "NeverEscapeTheBoundary", "Effect": "Deny", "Action": [
-          "iam:DeletePolicy", "iam:DeletePolicyVersion", "iam:CreatePolicyVersion",
-          "iam:SetDefaultPolicyVersion"
-        ], "Resource": "'"$BOUNDARY_ARN"'" }
-    ]
-  }' >/dev/null
-  pass "created"
-fi
-
-# GitHub changed the OIDC subject claim on 2026-07-15. Repositories created on or after
-# that date — and older ones that opted in — embed the permanent numeric ids of the owner
-# and the repository:
-#
-#   legacy     repo:owner/name:ref:refs/heads/main
-#   immutable  repo:owner@26320892/name@1342916764:ref:refs/heads/main
-#
-# A trust policy written for the legacy shape fails against the new one with
-# "Not authorized to perform sts:AssumeRoleWithWebIdentity" — an error that names the
-# action and not the mismatch, and looks exactly like a missing permission.
-#
-# The ids are what make the claim immutable: a recycled organisation or repository name
-# cannot mint a token that matches a stale policy. So the immutable form is used whenever
-# the ids can be read, and the legacy form only as a fallback.
-OWNER="${GITHUB_REPO%%/*}"
-REPO_NAME="${GITHUB_REPO##*/}"
-SUBJECT="repo:${GITHUB_REPO}:*"
-
-# Read over plain HTTPS rather than through `gh`: the ids are public for a public
-# repository, so this needs no authentication — and `gh` inherits whatever GITHUB_TOKEN
-# happens to be in the environment, which silently fails when that token is stale. That
-# failure is invisible here: the script would fall back to the legacy form and produce a
-# trust policy that looks right and does not work.
-REPO_JSON="$(curl -fsSL "https://api.github.com/repos/${GITHUB_REPO}" 2>/dev/null || true)"
-if [[ -n "$REPO_JSON" ]]; then
-  read -r OWNER_ID REPO_ID <<<"$(printf '%s' "$REPO_JSON" | python3 -c "
-import json, sys
-try:
-    d = json.load(sys.stdin)
-    print(d['owner']['id'], d['id'])
-except Exception:
-    print('', '')
-")"
-  if [[ -n "${OWNER_ID:-}" && -n "${REPO_ID:-}" ]]; then
-    SUBJECT="repo:${OWNER}@${OWNER_ID}/${REPO_NAME}@${REPO_ID}:*"
+  # **Updated, not skipped.** A boundary is a ceiling: a role can be granted acm:* and
+  # still be refused it if the boundary predates that service. That is exactly what
+  # happened — the role policy was refreshed, the boundary was not, and the deploy failed
+  # on `acm:DescribeCertificate` with a message about the role's identity policy.
+  #
+  # IAM keeps at most five versions, so the oldest non-default is pruned first.
+  OLDEST="$(aws iam list-policy-versions --policy-arn "$BOUNDARY_ARN" \
+    --query 'sort_by(Versions[?!IsDefaultVersion], &CreateDate)[0].VersionId' --output text)"
+  if [[ "$(aws iam list-policy-versions --policy-arn "$BOUNDARY_ARN" --query 'length(Versions)' --output text)" -ge 5 ]]; then
+    aws iam delete-policy-version --policy-arn "$BOUNDARY_ARN" --version-id "$OLDEST" >/dev/null
   fi
-fi
-
-if [[ "$SUBJECT" == *"@"* ]]; then
-  info "subject claim: immutable form (owner and repository ids embedded)"
+  aws iam create-policy-version --policy-arn "$BOUNDARY_ARN" \
+    --policy-document "$BOUNDARY_DOC" --set-as-default >/dev/null
+  pass "boundary updated"
 else
-  warn "subject claim: legacy form — gh could not read the repository ids."
-  warn "If the deploy fails with sts:AssumeRoleWithWebIdentity, this is why (2026-07-15 change)."
+  aws iam create-policy --policy-name "$BOUNDARY_NAME" --policy-document "$BOUNDARY_DOC" >/dev/null
+  pass "boundary created"
 fi
 
 TRUST_POLICY="$(jq -n --arg arn "$OIDC_ARN" --arg host "$OIDC_HOST" --arg sub "$SUBJECT" '{
@@ -207,6 +179,11 @@ else
   pass "created with the boundary attached"
 fi
 
+# ACM (the ALB certificate) and CloudWatch (the scale-from-zero alarms) were added to the
+# infrastructure after this policy was first written, and the first pipeline deploy failed
+# on `acm:DescribeCertificate`. A least-privilege policy is something to maintain, not
+# something to write once — re-running this script is how it is brought back in line.
+#
 # The role's own permissions are the boundary's allow-list. The boundary is the ceiling;
 # this is the grant. Both are needed — a boundary alone permits nothing.
 aws iam put-role-policy --role-name "$ROLE_NAME" --policy-name ccoa-deploy-inline \
@@ -216,7 +193,8 @@ aws iam put-role-policy --role-name "$ROLE_NAME" --policy-name ccoa-deploy-inlin
       { "Effect": "Allow", "Action": [
           "ec2:*", "ecs:*", "ecr:*", "elasticloadbalancing:*", "cloudfront:*",
           "logs:*", "secretsmanager:*", "cognito-idp:*", "wafv2:*",
-          "application-autoscaling:*", "iam:PassRole", "iam:GetRole", "iam:CreateRole",
+          "application-autoscaling:*", "acm:*", "cloudwatch:*",
+          "iam:PassRole", "iam:GetRole", "iam:CreateRole",
           "iam:DeleteRole", "iam:AttachRolePolicy", "iam:DetachRolePolicy",
           "iam:PutRolePolicy", "iam:DeleteRolePolicy", "iam:TagRole",
           "iam:ListRolePolicies", "iam:ListAttachedRolePolicies", "iam:GetRolePolicy"
