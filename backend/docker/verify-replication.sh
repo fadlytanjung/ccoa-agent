@@ -109,8 +109,18 @@ start_app || { fail "app did not become healthy on the second boot"; exit 1; }
 expect "$(docker logs ccoa-replication-app 2>&1)" "restored $APP_DB_PATH from the replica" \
   "second boot restored from the replica"
 
+# `GET /threads` returns a page envelope, `{items: [...], next_cursor: ...}`, not a bare
+# array (docs/06 §3.2a). This read it as a list until the pagination change, and then
+# failed with a TypeError that reported itself as "durability is not working" — which was
+# false, and alarming. `.get("items", payload)` accepts either shape, so the check tests
+# durability rather than the response envelope.
 survived=$(curl -s "http://localhost:$APP_PORT/api/v1/threads" |
-  python3 -c "import sys,json; print('yes' if any(r['thread_id']=='$thread_id' for r in json.load(sys.stdin)) else 'no')")
+  python3 -c "
+import sys, json
+payload = json.load(sys.stdin)
+rows = payload.get('items', payload) if isinstance(payload, dict) else payload
+print('yes' if any(r['thread_id'] == '$thread_id' for r in rows) else 'no')
+")
 if [ "$survived" = "yes" ]; then
   pass "the write survived a container replacement — ADR-007 holds"
 else
