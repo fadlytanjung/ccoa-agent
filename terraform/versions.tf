@@ -5,6 +5,10 @@ terraform {
   required_version = ">= 1.11"
 
   required_providers {
+    tls = {
+      source  = "hashicorp/tls"
+      version = "~> 4.0"
+    }
     aws = {
       source = "hashicorp/aws"
       # docs/08 §3.3 specified `~> 5.70`; 6.x is current and is what this is written

@@ -96,7 +96,8 @@ if it broke is **Partial** at best.
 
 | Component | Status | Notes |
 |---|---|---|
-| **Terraform** — VPC, ECS, ALB, CloudFront, Cognito, S3, ECR, WAF | **Partial** | 20 files, `validate` clean. **Applied: 89 of 97 resources exist in `dev`.** The remaining 8 are blocked on AWS account verification for CloudFront ([ops-log](ops-log.md)), not on anything in this repository |
+| **Terraform** — VPC, ECS, ALB, Cognito, S3, ECR, WAF | **Built** | 21 files, `validate` clean, **fully applied**. `dev` is live and reachable |
+| CloudFront edge (`edge = "cloudfront"`) | **Blocked** | Written and planned clean; AWS will not create a distribution on an unverified account ([ops-log](ops-log.md)). `develop` runs `edge = "alb"` instead ([09](09-networking.md) §6.6) |
 | **CD — `deploy.yml`** | **Built** | Checks → build and push ARM64 images → apply → bounded smoke test. Repository secrets set. **Never executed** — the repository has no commits yet |
 | **CI — validate, test, browser, containers** | **Built** | `.github/workflows/ci.yml`. Runs the same checks as `scripts/verify.sh`. **Never executed on GitHub** — the repository was connected after it was written |
 
@@ -105,13 +106,17 @@ if it broke is **Partial** at best.
 | AWS bootstrap script | **Built** | `scripts/aws-bootstrap.sh`. **Executed** — state bucket, GitHub OIDC provider, permission boundary, and `ccoa-deploy` role all exist |
 | `scripts/deploy.sh`, `destroy.sh` | **Partial** | Written and exercised step by step by hand; **not yet run end to end**, because the CloudFront step cannot complete |
 | Cognito provisioning script | **Built** | `scripts/aws-cognito.sh`. **Executed against the real account** — pool, groups, domain, and public client exist in `ap-southeast-1`, self-registration disabled ([ops-log](ops-log.md), [ADR-008](adr/ADR-008-provisioned-identity.md)) |
-| Deployed environment | **Partial** | VPC, NAT, ALB, ECR, ECS cluster, frontend service, Cognito, S3, WAF, and logs all exist in `dev`. **Not reachable**: the only door is CloudFront, and CloudFront is blocked |
+| Deployed environment | **Built** | `dev` is live on an internet-facing ALB. SPA served, `/api/*` routed, anonymous requests `401`, HTTP redirects to HTTPS, security headers present, and the Cognito hosted UI reached from the deployed origin — all verified against the running environment |
+| Viewer TLS | **Partial** | A **self-signed** certificate, so every visitor sees a browser warning. Cognito rejects `http://` callbacks, so this was the only way to have working sign-in without a domain. A real certificate is one variable and ~15 minutes ([09](09-networking.md) §6.6) |
 
-**The headline:** the application is built and tested on a developer machine, and the
-infrastructure is now **mostly real**: 89 of 97 resources exist in `dev`. It is **not yet
-reachable**, because the only entrance is a CloudFront distribution and AWS will not
-create one until the account is verified — a Support case, not a code change
-([ops-log](ops-log.md)). Neither workflow has run: the repository has no commits yet.
+**The headline:** `dev` is **deployed and reachable**, on `develop`. The CloudFront edge
+the design argues for is blocked by AWS account verification, so the same Terraform runs
+an internet-facing ALB instead — one variable, with the security tradeoff stated in
+[09](09-networking.md) §6.6 rather than glossed over. The remaining honest weakness is the
+self-signed certificate; everything else in the deployed path is verified.
+
+`main` holds the CloudFront configuration and is what to return to once the account
+clears. `develop` holds the ALB edge and is what is live.
 
 ---
 

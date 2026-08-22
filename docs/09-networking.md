@@ -367,6 +367,55 @@ tfvars file.
 The **S3 gateway endpoint is unconditional** in both. It is free, and it carries ECR layer
 pulls, which are the great majority of the bytes either configuration moves.
 
+### 6.6 CloudFront or an internet-facing ALB — `var.edge`
+
+*(Added 2026-08-23.)* Everything above describes `edge = "cloudfront"`, which is the
+design this document argues for and the default. `dev` currently runs `edge = "alb"`, and
+this section is the honest accounting of what that changes.
+
+**Why.** AWS refuses to create a CloudFront distribution on an unverified account, and
+that is a Support case with no API and no workaround
+([18](18-aws-access-and-manual-steps.md) §3.4). The brief leaves service selection open,
+so an internet-facing ALB is a legitimate choice rather than a compromise — but it is not
+an equivalent one.
+
+**What is unchanged.** Almost everything. Same VPC, same two AZs, same private subnets,
+same security-group-to-security-group rules, same task definitions, same IAM, same
+Cognito, same audit trail. The compute does not move: tasks stay in private subnets with
+no public IP under both edges.
+
+**What changes, precisely:**
+
+| | `cloudfront` | `alb` |
+|---|---|---|
+| Listener address | **None from the internet.** The ALB is `internal` and holds private IPs only | Public DNS name, reachable from anywhere |
+| B1 (edge) | CloudFront is the only door; the origin has no public address | **The security group is the only thing between the internet and the listener** |
+| Viewer TLS | CloudFront's own certificate, TLS 1.2 minimum | HTTPS only if `acm_certificate_arn` is set, which needs a domain. Otherwise **HTTP** |
+| WAF | Global scope, at the edge | Regional scope, attached to the ALB — same rules |
+| Caching | `/api/*` explicitly uncached; hashed assets cached hard | No cache layer at all, so the risk of serving one agent's response to another does not arise |
+| Subnets holding the ALB | Private | Public (an internet-facing LB requires a route to the IGW) |
+
+**The honest summary.** [§3](#3-security-boundaries-req-052) says the trust boundary is
+B2, not B1 — an unauthenticated request to `/api/v1/customers/…` returns `401` wherever it
+comes from, and reaching the edge grants nothing. That argument holds under both edges,
+and it is why this substitution is defensible at all.
+
+What is genuinely lost is **defence in depth at B3**. Under `cloudfront`, a security group
+mistakenly widened to `0.0.0.0/0` still exposes nothing, because a private subnet has no
+route from the internet either — two independent controls must fail. Under `alb`, that
+security group *is* the control, and widening it is sufficient to expose the listener.
+That is a real reduction, and it is the reason the CloudFront design is the default rather
+than the other way round.
+
+**Without a certificate there is a second loss:** the viewer hop is unencrypted. The data
+is synthetic ([00](00-constitution.md) §7), so this is a demonstration risk rather than a
+disclosure one — but a Cognito access token also crosses that hop, and an unencrypted
+token is an unencrypted credential. Set `acm_certificate_arn` and it goes away; a domain
+in a cheap TLD plus DNS validation is about fifteen minutes.
+
+**Reversing it is one word** in `envs/dev.tfvars`. The ALB is replaced, the VPC origin and
+the regional WAF are swapped for their CloudFront equivalents, and nothing else moves.
+
 ### 6.4 Security groups rather than NACLs
 
 NACLs are stateless, subnet-wide, and evaluated in rule-number order — easy to get

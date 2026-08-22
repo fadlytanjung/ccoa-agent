@@ -6,11 +6,16 @@
 # group, where the listener is addressable and the group is the only thing in the way.
 
 resource "aws_lb" "main" {
-  name               = local.name
-  internal           = true
+  name = local.name
+  # Internal behind CloudFront; internet-facing when it *is* the edge. This one boolean is
+  # the whole difference between the two topologies — see docs/09 §6.6 for what it costs.
+  internal           = local.use_cloudfront
   load_balancer_type = "application"
-  subnets            = aws_subnet.private[*].id
-  security_groups    = [aws_security_group.alb.id]
+  # Internet-facing load balancers must sit in subnets with a route to the internet
+  # gateway. The tasks stay in the private subnets either way, which is the property that
+  # matters: the ALB moving does not move the compute.
+  subnets         = local.use_cloudfront ? aws_subnet.private[*].id : aws_subnet.public[*].id
+  security_groups = [aws_security_group.alb.id]
 
   drop_invalid_header_fields = true
   enable_deletion_protection = false # dev is destroyed routinely (docs/08 §3.1)
@@ -70,17 +75,75 @@ resource "aws_lb_target_group" "frontend" {
   tags = { Name = "${local.name}-frontend" }
 }
 
-# HTTP only. TLS terminates at CloudFront, and the hop from there to this listener is
-# inside the VPC over a VPC origin — it never crosses the internet (docs/09 §4.3).
+# Port 80.
+#
+# Behind CloudFront this carries no viewer traffic: TLS terminates at the edge and this
+# hop runs inside the VPC over a VPC origin (docs/09 §4.3).
+#
+# As the edge with a certificate, it redirects to 443. As the edge without one, it *is*
+# the listener — unencrypted, and said plainly rather than hidden behind an https:// URL
+# that would not resolve.
 resource "aws_lb_listener" "http" {
   load_balancer_arn = aws_lb.main.arn
   port              = 80
   protocol          = "HTTP"
 
+  dynamic "default_action" {
+    for_each = local.alb_https ? [1] : []
+    content {
+      type = "redirect"
+      redirect {
+        port        = "443"
+        protocol    = "HTTPS"
+        status_code = "HTTP_301"
+      }
+    }
+  }
+
   # Everything that is not the API is the SPA.
+  dynamic "default_action" {
+    for_each = local.alb_https ? [] : [1]
+    content {
+      type             = "forward"
+      target_group_arn = aws_lb_target_group.frontend.arn
+    }
+  }
+}
+
+resource "aws_lb_listener" "https" {
+  count = local.alb_https ? 1 : 0
+
+  load_balancer_arn = aws_lb.main.arn
+  port              = 443
+  protocol          = "HTTPS"
+  ssl_policy        = "ELBSecurityPolicy-TLS13-1-2-2021-06"
+  certificate_arn   = local.certificate_arn
+
   default_action {
     type             = "forward"
     target_group_arn = aws_lb_target_group.frontend.arn
+  }
+}
+
+# The API rule has to exist on whichever listener actually serves traffic, so it is
+# duplicated onto the HTTPS one rather than assumed to be inherited — listener rules are
+# per listener, and a missing rule here sends every /api/* call to the SPA, which answers
+# 200 with index.html and makes the failure look like a frontend bug.
+resource "aws_lb_listener_rule" "api_https" {
+  count = local.alb_https ? 1 : 0
+
+  listener_arn = aws_lb_listener.https[0].arn
+  priority     = 100
+
+  action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.backend.arn
+  }
+
+  condition {
+    path_pattern {
+      values = ["/api/*"]
+    }
   }
 }
 

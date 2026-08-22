@@ -73,12 +73,14 @@ resource "aws_cognito_user_pool_client" "spa" {
   # Both origins, always. `http://localhost` is permitted by Cognito specifically so a SPA
   # can be developed against real identities, and keeping it registered is what lets the
   # deployed pool be used from a laptop (docs/18 §7).
+  # Built from whichever edge is in force. `local.app_url` is the one place that decides
+  # between the CloudFront domain and the ALB's, and between https and http.
   callback_urls = [
-    "https://${aws_cloudfront_distribution.main.domain_name}/callback",
+    "${local.app_url}/callback",
     "http://localhost:5173/callback",
   ]
   logout_urls = [
-    "https://${aws_cloudfront_distribution.main.domain_name}",
+    local.app_url,
     "http://localhost:5173",
   ]
 

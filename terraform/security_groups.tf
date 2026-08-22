@@ -49,6 +49,8 @@ resource "aws_security_group" "endpoints" {
 # The only ingress the load balancer accepts is from CloudFront's VPC origin ENIs. There
 # is no internet-facing listener anywhere in this design (docs/09 §1).
 resource "aws_vpc_security_group_ingress_rule" "alb_from_vpc_origin" {
+  count = local.use_cloudfront ? 1 : 0
+
   security_group_id            = aws_security_group.alb.id
   referenced_security_group_id = aws_security_group.vpc_origin.id
   from_port                    = 80
@@ -75,8 +77,36 @@ resource "aws_vpc_security_group_egress_rule" "alb_to_frontend" {
   description                  = "Frontend target group"
 }
 
+# When the ALB is the edge, it takes traffic from the internet directly. This is the rule
+# the CloudFront topology exists to avoid: here the security group is the only thing
+# between the internet and the listener, where before the listener had no public address
+# at all (docs/09 §6.6).
+resource "aws_vpc_security_group_ingress_rule" "alb_public_http" {
+  count = local.use_cloudfront ? 0 : 1
+
+  security_group_id = aws_security_group.alb.id
+  cidr_ipv4         = "0.0.0.0/0"
+  from_port         = 80
+  to_port           = 80
+  ip_protocol       = "tcp"
+  description       = "Public HTTP (redirects to 443 when a certificate is configured)"
+}
+
+resource "aws_vpc_security_group_ingress_rule" "alb_public_https" {
+  count = local.alb_https ? 1 : 0
+
+  security_group_id = aws_security_group.alb.id
+  cidr_ipv4         = "0.0.0.0/0"
+  from_port         = 443
+  to_port           = 443
+  ip_protocol       = "tcp"
+  description       = "Public HTTPS"
+}
+
 # --- CloudFront VPC origin ----------------------------------------------------------
 resource "aws_vpc_security_group_egress_rule" "vpc_origin_to_alb" {
+  count = local.use_cloudfront ? 1 : 0
+
   security_group_id            = aws_security_group.vpc_origin.id
   referenced_security_group_id = aws_security_group.alb.id
   from_port                    = 80

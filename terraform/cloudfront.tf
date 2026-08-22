@@ -5,6 +5,8 @@
 # to validate (docs/00 §6), and reaches the internal ALB over a VPC origin.
 
 resource "aws_cloudfront_vpc_origin" "alb" {
+  count = local.use_cloudfront ? 1 : 0
+
   vpc_origin_endpoint_config {
     name                   = local.name
     arn                    = aws_lb.main.arn
@@ -22,18 +24,20 @@ resource "aws_cloudfront_vpc_origin" "alb" {
 }
 
 resource "aws_cloudfront_distribution" "main" {
+  count = local.use_cloudfront ? 1 : 0
+
   enabled         = true
   is_ipv6_enabled = true
   comment         = local.name
   price_class     = "PriceClass_200" # includes ap-southeast-1
-  web_acl_id      = aws_wafv2_web_acl.main.arn
+  web_acl_id      = aws_wafv2_web_acl.cloudfront[0].arn
 
   origin {
     origin_id   = "alb"
     domain_name = aws_lb.main.dns_name
 
     vpc_origin_config {
-      vpc_origin_id = aws_cloudfront_vpc_origin.alb.id
+      vpc_origin_id = aws_cloudfront_vpc_origin.alb[0].id
     }
   }
 

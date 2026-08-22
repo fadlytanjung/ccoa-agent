@@ -7,12 +7,23 @@
 
 output "app_url" {
   description = "Where the application is. The only URL a person needs."
-  value       = "https://${aws_cloudfront_distribution.main.domain_name}"
+  value       = local.app_url
+}
+
+output "edge" {
+  description = "Which service is fronting the application, and whether the viewer hop is encrypted."
+  value = {
+    kind      = var.edge
+    encrypted = local.use_cloudfront || local.alb_https
+    # True when visitors will see a certificate warning. Surfaced as an output because it
+    # is the kind of thing that is obvious on the day and forgotten a week later.
+    self_signed_certificate = local.self_signed
+  }
 }
 
 output "cloudfront_domain_name" {
-  description = "CloudFront domain, for the smoke test and for Cognito callback URLs."
-  value       = aws_cloudfront_distribution.main.domain_name
+  description = "CloudFront domain. Null when the ALB is the edge."
+  value       = local.use_cloudfront ? aws_cloudfront_distribution.main[0].domain_name : null
 }
 
 output "cognito_user_pool_id" {

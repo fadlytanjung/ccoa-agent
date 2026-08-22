@@ -22,6 +22,74 @@ variable "vpc_cidr" {
   default     = "10.0.0.0/16"
 }
 
+variable "edge" {
+  description = <<-EOT
+    Which service fronts the application.
+
+    `cloudfront` — the design in docs/08 and docs/09: an internal ALB reachable only as a
+    CloudFront VPC origin, with TLS from CloudFront's own certificate and WAF at the edge.
+    The listener is not addressable from the internet at all.
+
+    `alb` — an internet-facing ALB, with WAF attached regionally instead. Chosen when
+    CloudFront is unavailable: a new AWS account cannot create distributions until AWS
+    verifies it, and that is a Support case with no API and no workaround (docs/18 §3.4).
+
+    The brief leaves service selection open, so this is a legitimate choice rather than a
+    compromise — but it is a genuine downgrade of one boundary, and docs/09 §6.6 says
+    exactly which. Everything else is unchanged: same VPC, same private subnets, same
+    security groups, same tasks.
+  EOT
+  type        = string
+  default     = "cloudfront"
+
+  validation {
+    condition     = contains(["cloudfront", "alb"], var.edge)
+    error_message = "edge must be `cloudfront` or `alb`."
+  }
+}
+
+variable "acm_certificate_arn" {
+  description = <<-EOT
+    Certificate for the internet-facing ALB. Only used when `edge = "alb"`.
+
+    Empty means the listener is **HTTP only**, because there is no other honest option: a
+    certificate requires a domain you control, and an ALB's own `*.elb.amazonaws.com`
+    name cannot have one. A self-signed certificate would produce a browser warning that
+    trains people to click through warnings, which is worse than the plain statement that
+    this hop is unencrypted.
+
+    With a domain: `aws acm request-certificate --domain-name app.example.com
+    --validation-method DNS`, validate it, and put the ARN here. The listener then serves
+    HTTPS on 443 and redirects 80 to it.
+
+    Without one, `self_signed_certificate` decides what happens instead.
+  EOT
+  type        = string
+  default     = ""
+}
+
+variable "self_signed_certificate" {
+  description = <<-EOT
+    Generate a self-signed certificate for the ALB when no ACM ARN is supplied.
+
+    This exists because of a constraint that only appears at the end: **Cognito rejects
+    `http://` callback URLs** for anything except `localhost`. So an HTTP-only edge cannot
+    do sign-in at all — not degraded, not insecure-but-working, simply impossible. The
+    choice is therefore not "HTTPS or HTTP", it is "HTTPS or no authentication".
+
+    What this buys: a working sign-in, immediately, with no domain.
+    What it costs: every visitor gets a browser interstitial they must click through,
+    because nothing vouches for the certificate. Traffic is encrypted; the identity of the
+    endpoint is not attested.
+
+    **This is a stopgap, not a design.** A real certificate is a domain in a cheap TLD and
+    about fifteen minutes of DNS validation, and it removes the warning entirely. Set
+    `acm_certificate_arn` and this is ignored.
+  EOT
+  type        = bool
+  default     = false
+}
+
 variable "single_nat_gateway" {
   description = <<-EOT
     Route both private subnets through one NAT gateway instead of one per AZ.

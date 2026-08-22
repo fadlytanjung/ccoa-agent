@@ -50,9 +50,9 @@ shape every choice below:
 | VPC `10.0.0.0/16` | 2 AZs, 2 public + 2 private subnets | [09](09-networking.md) §1 |
 | Internet Gateway | 1 | NAT egress |
 | **NAT Gateway** | 1 per AZ in `prod`; **1 total in `dev`** (`var.single_nat_gateway`) | Availability against 23% of the idle bill — [09](09-networking.md) §6.3 |
-| **CloudFront distribution** | HTTPS, **default certificate**, VPC origin | Viewer TLS with no domain to buy |
-| **AWS WAF** | Managed rule sets + rate limiting, attached to CloudFront | The only internet-facing surface |
-| **Application Load Balancer** | **`internal`**, 2 AZs | No public IP; reachable only as a CloudFront VPC origin |
+| **CloudFront distribution** | HTTPS, **default certificate**, VPC origin — `var.edge = "cloudfront"` | Viewer TLS with no domain to buy. Substitutable for an internet-facing ALB where CloudFront is unavailable ([09](09-networking.md) §6.6) |
+| **AWS WAF** | Managed rule sets + rate limiting. `CLOUDFRONT` scope, or `REGIONAL` attached to the ALB — same rules either way | Whatever the internet-facing surface is |
+| **Application Load Balancer** | `internal` under `edge = "cloudfront"`; **internet-facing** under `edge = "alb"`, 2 AZs | Under CloudFront it has no public IP at all. As the edge it is the only ingress, and the security group becomes the boundary ([09](09-networking.md) §6.6) |
 | ALB target groups | 2 — `frontend:8080`, `backend:8000` | Independent health and deployment |
 | **Interface VPC endpoints** | ECR API, ECR DKR, Secrets Manager, CloudWatch Logs — **`prod` only** (`var.enable_interface_endpoints`) | AWS-service traffic never leaves the VPC. 40% of the idle bill, so `dev` routes it via NAT instead ([16](16-cost-model.md) §4a) |
 | **S3 gateway endpoint** | Free | ECR layer pulls stay off the internet |
