@@ -190,15 +190,29 @@ jobs:
       - name: Collect outputs
         id: outputs
         working-directory: terraform
-        run: echo "app_url=$(terraform output -raw app_url)" >> "$GITHUB_OUTPUT"
+        run: |
+          echo "app_url=$(terraform output -raw app_url)" >> "$GITHUB_OUTPUT"
+          # Whether the environment is knowingly running a certificate nothing vouches
+          # for. The smoke test needs to know: curl rejects one, and a rejected
+          # connection reports http_code 000, which reads as "the app is down".
+          echo "self_signed=$(terraform output -json edge | jq -r .self_signed_certificate)" >> "$GITHUB_OUTPUT"
 
       # Bounded. A cold start is 45-75 s; past two and a half minutes the answer is in the
       # logs, not in more waiting.
       - name: Smoke test
         env:
           APP_URL: ${{ steps.outputs.outputs.app_url }}
+          SELF_SIGNED: ${{ steps.outputs.outputs.self_signed }}
         run: |
-          code() { curl -s -o /dev/null -w '%{http_code}' --max-time 10 "$1"; }
+          # `-k` **only** when Terraform says the certificate is self-signed. Applying it
+          # unconditionally would turn a genuine TLS failure into a green build, which is
+          # the opposite of what a smoke test is for.
+          INSECURE=""
+          if [ "$SELF_SIGNED" = "true" ]; then
+            INSECURE="-k"
+            echo "::warning::Verifying against a self-signed certificate. Set acm_certificate_arn to remove this."
+          fi
+          code() { curl -s $INSECURE -o /dev/null -w '%{http_code}' --max-time 10 "$1"; }
 
           deadline=$(( SECONDS + 150 ))
           until [ "$(code "$APP_URL/")" = "200" ]; do
@@ -225,11 +239,19 @@ jobs:
           # A cached /api/* response would serve one agent's answer — including another
           # customer's records — to a different agent. The highest-risk line in the whole
           # design, and docs/09 §8 requires it to be tested (docs/08 §3.5).
-          xcache="$(curl -s -D - -o /dev/null --max-time 10 "$APP_URL/api/v1/config" | tr -d '\r' | grep -i '^x-cache' || true)"
-          case "$xcache" in
-            *[Mm]iss*) echo "ok   /api/* is not cached ($xcache)" ;;
-            *)         echo "::error::/api/* may be cached: $xcache"; fail=1 ;;
-          esac
+          #
+          # Only meaningful behind CloudFront: an `X-Cache` header is CloudFront's. On the
+          # ALB edge there is no cache layer at all, so the risk does not arise and its
+          # absence is the correct result rather than a missing assertion.
+          xcache="$(curl -s $INSECURE -D - -o /dev/null --max-time 10 "$APP_URL/api/v1/config" | tr -d '\r' | grep -i '^x-cache' || true)"
+          if [ -z "$xcache" ]; then
+            echo "ok   no cache layer in front of /api/* (ALB edge)"
+          else
+            case "$xcache" in
+              *[Mm]iss*) echo "ok   /api/* is not cached ($xcache)" ;;
+              *)         echo "::error::/api/* may be cached: $xcache"; fail=1 ;;
+            esac
+          fi
 
           exit $fail
 
