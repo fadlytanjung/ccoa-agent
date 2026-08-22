@@ -14,6 +14,7 @@ import pytest
 from sqlalchemy import text
 
 from app.db.engine import Database
+from app.db.migration_filters import is_virtual_vector_table
 from app.domain.enums import (
     AuditOutcome,
     CaseStatus,
@@ -164,3 +165,31 @@ class TestAuditIsAppendOnly:
 
         rows = AuditRepository(db).for_trace("t-2")
         assert [(r.action, r.outcome) for r in rows] == [("create_ticket", "failed")]
+
+
+class TestVirtualTableFilters:
+    """The two alembic filters — docs/13 §3.1, docs/04 §3.7.
+
+    `vec_interaction` and `vec_kb` are `vec0` virtual tables created by migration SQL,
+    not by SQLAlchemy models. They must be invisible to autogenerate, and — the part that
+    actually broke CI — invisible to *reflection*, because reflecting a virtual table
+    issues `PRAGMA table_xinfo` and that fails with `no such module: vec0` on any
+    connection without the extension loaded. Alembic's connection is one of those.
+    """
+
+    def test_include_name_hides_virtual_tables_before_reflection(self) -> None:
+        assert is_virtual_vector_table("vec_interaction", "table") is True
+        assert is_virtual_vector_table("vec_kb", "table") is True
+
+    def test_include_name_keeps_the_modelled_companion(self) -> None:
+        # `vec_meta` is an ordinary table with a model, so it stays in scope; excluding it
+        # would make autogenerate propose dropping it on every run.
+        assert is_virtual_vector_table("vec_meta", "table") is False
+
+    def test_include_name_keeps_ordinary_tables(self) -> None:
+        for name in ("customer", "policy", "ticket", "thread"):
+            assert is_virtual_vector_table(name, "table") is False
+
+    def test_include_name_only_filters_tables(self) -> None:
+        # An index or column called `vec_something` is not a virtual table.
+        assert is_virtual_vector_table("vec_interaction", "column") is False

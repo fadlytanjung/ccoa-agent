@@ -25,6 +25,8 @@ config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
+from app.db.migration_filters import is_virtual_vector_table  # noqa: E402
+
 target_metadata = Base.metadata
 
 
@@ -43,6 +45,16 @@ def _database_url() -> str:
     return f"sqlite+pysqlite:///{get_settings().db_path}"
 
 
+def include_name(
+    name: str | None,
+    type_: str,
+    parent_names: dict[str, str | None],
+) -> bool:
+    """Keep ``vec0`` virtual tables out of **reflection** — app.db.migration_filters."""
+    del parent_names
+    return not is_virtual_vector_table(name, type_)
+
+
 def include_object(
     _object: object, name: str | None, type_: str, _reflected: bool, _compare_to: object
 ) -> bool:
@@ -52,10 +64,7 @@ def include_object(
     propose dropping ``vec_interaction`` and ``vec_kb``. Their plain-table companion
     ``vec_meta`` *is* modelled and stays in scope.
     """
-    virtual_vector_table = (
-        type_ == "table" and name is not None and name.startswith("vec_") and name != "vec_meta"
-    )
-    return not virtual_vector_table
+    return not is_virtual_vector_table(name, type_)
 
 
 def run_migrations_offline() -> None:
@@ -67,6 +76,7 @@ def run_migrations_offline() -> None:
         render_as_batch=True,
         compare_type=True,
         include_object=include_object,
+        include_name=include_name,
     )
     with context.begin_transaction():
         context.run_migrations()
@@ -103,6 +113,7 @@ def run_migrations_online() -> None:
             render_as_batch=True,
             compare_type=True,
             include_object=include_object,
+            include_name=include_name,
         )
         with context.begin_transaction():
             context.run_migrations()
