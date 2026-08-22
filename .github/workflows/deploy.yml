@@ -1,0 +1,241 @@
+# Deploy on merge to main — docs/11 §3.5, §3.6.
+#
+# Fast on purpose. The merge gate already ran the full suite on the pull request, so this
+# re-runs only what would be embarrassing to deploy past — lint, types, unit tests, and a
+# build that must succeed anyway — and then ships.
+#
+# What is deliberately NOT here:
+#
+#   * **Agent evaluations.** They call a real model, cost money per run, and a failure
+#     needs a person to judge whether the agent regressed or the expectation was wrong.
+#     In a deploy path that judgement gets skipped, every time (docs/19 §3.1).
+#   * **`@live` browser tests.** Same reason: they need a Gemini key and spend tokens.
+#     The token-free browser tier runs on the pull request instead.
+#   * **`prod`.** The job exists, is gated on an environment that has no approvers, and is
+#     never approved (docs/00 §5, ADR-006 §2).
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Never two deploys at once: they would race on the Terraform state lock, and the loser
+# fails with a lock error that looks like a bug. `cancel-in-progress: false` because
+# cancelling half an apply is worse than queueing.
+concurrency:
+  group: deploy-dev
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  id-token: write # required to mint the OIDC token that assumes the AWS role
+
+env:
+  AWS_REGION: ap-southeast-1
+  ENVIRONMENT: dev
+  NODE_VERSION: "22"
+  PYTHON_VERSION: "3.12"
+
+jobs:
+  check:
+    name: Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: astral-sh/setup-uv@v10
+        with:
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Backend
+        working-directory: backend
+        run: |
+          uv python install ${{ env.PYTHON_VERSION }}
+          uv sync --locked
+          uv run ruff check .
+          uv run mypy app
+          uv run python -m app.seed --reset
+          uv run pytest -q
+          uv run python tools/check_no_inline_prompts.py
+
+      - name: Frontend
+        working-directory: frontend
+        run: |
+          npm ci
+          npx tsc -b --noEmit
+          npm run lint
+          npx vitest run
+          npm run build
+
+      - name: Repository
+        run: |
+          python3 tools/check_no_account_identifiers.py
+          python3 tools/check_implementation_status.py
+
+  deploy:
+    name: Deploy dev
+    runs-on: ubuntu-latest
+    needs: [check]
+    environment: dev
+    outputs:
+      app_url: ${{ steps.outputs.outputs.app_url }}
+    steps:
+      - uses: actions/checkout@v7
+
+      # No access keys anywhere. The role is assumed with a short-lived OIDC token, and
+      # its trust policy is scoped by `sub` to this repository — without that condition
+      # any repository on GitHub could assume it (docs/18 §4 Step 4).
+      - name: Assume the deploy role
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: "1.15.8"
+
+      - name: Terraform init
+        working-directory: terraform
+        run: |
+          # The bucket name contains the account id, so it is read from the caller's own
+          # identity rather than written into a file this public repository holds.
+          ACCOUNT_ID="$(aws sts get-caller-identity --query Account --output text)"
+          terraform init -reconfigure -input=false \
+            -backend-config="bucket=ccoa-tfstate-${ACCOUNT_ID}" \
+            -backend-config="key=${ENVIRONMENT}/terraform.tfstate" \
+            -backend-config="region=${AWS_REGION}"
+
+      - name: Terraform format and validate
+        working-directory: terraform
+        run: |
+          terraform fmt -check -recursive
+          terraform validate
+
+      # The repositories must exist before anything can be pushed to them, and the
+      # services cannot start without images — so this is split out rather than folded
+      # into the apply below.
+      - name: Ensure the repositories exist
+        working-directory: terraform
+        run: |
+          terraform apply -input=false -auto-approve \
+            -var-file="envs/${ENVIRONMENT}.tfvars" \
+            -var="backend_image_tag=${GITHUB_SHA::12}" \
+            -var="frontend_image_tag=${GITHUB_SHA::12}" \
+            -target=aws_ecr_repository.backend \
+            -target=aws_ecr_repository.frontend
+
+      - uses: aws-actions/amazon-ecr-login@v2
+        id: ecr
+
+      - uses: docker/setup-buildx-action@v4
+
+      # ARM64, matching `runtime_platform` in the task definitions. A runner is amd64, so
+      # this needs an explicit platform — get it wrong and the task dies with
+      # `exec format error`, which names neither the cause nor the fix.
+      - name: Build and push the backend
+        uses: docker/build-push-action@v7
+        with:
+          context: backend
+          platforms: linux/arm64
+          push: true
+          tags: ${{ steps.ecr.outputs.registry }}/ccoa-${{ env.ENVIRONMENT }}-backend:${{ github.sha }}
+          cache-from: type=gha,scope=backend
+          cache-to: type=gha,mode=max,scope=backend
+
+      - name: Build and push the frontend
+        uses: docker/build-push-action@v7
+        with:
+          context: frontend
+          platforms: linux/arm64
+          push: true
+          tags: ${{ steps.ecr.outputs.registry }}/ccoa-${{ env.ENVIRONMENT }}-frontend:${{ github.sha }}
+          cache-from: type=gha,scope=frontend
+          cache-to: type=gha,mode=max,scope=frontend
+
+      - name: Apply
+        working-directory: terraform
+        run: |
+          terraform apply -input=false -auto-approve \
+            -var-file="envs/${ENVIRONMENT}.tfvars" \
+            -var="backend_image_tag=${GITHUB_SHA}" \
+            -var="frontend_image_tag=${GITHUB_SHA}"
+
+      - name: Collect outputs
+        id: outputs
+        working-directory: terraform
+        run: echo "app_url=$(terraform output -raw app_url)" >> "$GITHUB_OUTPUT"
+
+      # Bounded. A cold start is 45-75 s; past two and a half minutes the answer is in the
+      # logs, not in more waiting.
+      - name: Smoke test
+        env:
+          APP_URL: ${{ steps.outputs.outputs.app_url }}
+        run: |
+          code() { curl -s -o /dev/null -w '%{http_code}' --max-time 10 "$1"; }
+
+          deadline=$(( SECONDS + 150 ))
+          until [ "$(code "$APP_URL/")" = "200" ]; do
+            if [ "$SECONDS" -ge "$deadline" ]; then
+              echo "::error::no 200 from $APP_URL within 150s"
+              aws logs tail "/ecs/ccoa-${ENVIRONMENT}/backend" --since 5m || true
+              exit 1
+            fi
+            sleep 5
+          done
+          echo "responding after ${SECONDS}s"
+
+          fail=0
+          expect() {
+            if [ "$3" = "$2" ]; then echo "ok   $1 ($3)"; else echo "::error::$1 — got $3, wanted $2"; fail=1; fi
+          }
+          expect "the SPA is served"         200 "$(code "$APP_URL/")"
+          expect "a client route falls back" 200 "$(code "$APP_URL/threads/th_example")"
+          # The security property, asserted rather than assumed: reaching CloudFront
+          # grants nothing (docs/09 §3).
+          expect "the API rejects anonymous" 401 "$(code "$APP_URL/api/v1/threads")"
+          expect "public config is readable" 200 "$(code "$APP_URL/api/v1/config")"
+
+          # A cached /api/* response would serve one agent's answer — including another
+          # customer's records — to a different agent. The highest-risk line in the whole
+          # design, and docs/09 §8 requires it to be tested (docs/08 §3.5).
+          xcache="$(curl -s -D - -o /dev/null --max-time 10 "$APP_URL/api/v1/config" | tr -d '\r' | grep -i '^x-cache' || true)"
+          case "$xcache" in
+            *[Mm]iss*) echo "ok   /api/* is not cached ($xcache)" ;;
+            *)         echo "::error::/api/* may be cached: $xcache"; fail=1 ;;
+          esac
+
+          exit $fail
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "### Deployed to \`${ENVIRONMENT}\`"
+            echo ""
+            echo "- App: ${{ steps.outputs.outputs.app_url }}"
+            echo "- Image tag: \`${GITHUB_SHA}\`"
+            echo ""
+            echo "\`dev\` is ephemeral — \`./scripts/destroy.sh\` when idle (~\$0.09/hr while up)."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  prod:
+    name: Deploy prod (never approved)
+    runs-on: ubuntu-latest
+    needs: [deploy]
+    # An environment with no approvers and no reviewers. The job is here so that "the
+    # design supports production" is a checkable claim rather than an assertion, and so
+    # that approving it is a deliberate act somebody has to perform. It never is
+    # (docs/00 §5, ADR-006 §2).
+    environment: prod
+    if: false # belt and braces: the gate above is the real control, this is the visible one
+    steps:
+      - run: echo "prod is configuration only. See docs/00 §5."

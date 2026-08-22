@@ -1,0 +1,142 @@
+[project]
+name = "ccoa-backend"
+version = "0.1.0"
+description = "CCOA — AI Contact Center Operations Assistant, orchestration service"
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+
+dependencies = [
+    # Orchestration — pins are load-bearing, see docs/02-research.md §4.2 (CVEs)
+    "langgraph==1.2.11",
+    "langgraph-checkpoint-sqlite==3.1.1",
+    "langchain-core==1.6.0",
+    "langchain-google-genai==4.3.4",
+
+    # HTTP
+    "fastapi==0.141.1",
+    "uvicorn[standard]>=0.34,<0.40",
+    "sse-starlette>=2.1,<3",
+
+    # Config, validation, auth
+    "pydantic>=2.9,<3",
+    "pydantic-settings>=2.5,<3",
+    "python-jose[cryptography]>=3.3,<4",
+    "httpx>=0.27,<0.29",
+
+    # Data
+    "sqlalchemy>=2.0.36,<3",
+    "alembic>=1.14,<2",
+    "aiosqlite>=0.20,<0.22",
+
+    # Skills and templates
+    "pyyaml>=6.0,<7",
+    "jinja2>=3.1,<4",
+
+    # Structured logging
+    "structlog>=24.4,<26",
+]
+
+[project.optional-dependencies]
+# Nice-to-have — docs/13-vector-search.md. Kept optional so the required path
+# never depends on it.
+vector = ["sqlite-vec==0.1.9"]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3,<9",
+    "pytest-asyncio>=0.24,<1.2",
+    "pytest-cov>=6.0,<8",
+    "ruff>=0.8,<0.15",
+    "mypy>=1.13,<2",
+    "types-pyyaml>=6.0,<7",
+    "langgraph-cli[inmem]==0.4.31",
+    "watchfiles>=0.24,<2",
+]
+evals = [
+    "deepeval>=4.1,<5",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["app"]
+
+# ---------------------------------------------------------------------------
+# Lint / format — docs/CLAUDE.md conventions
+# ---------------------------------------------------------------------------
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["app", "tests"]
+
+[tool.ruff.lint]
+select = [
+    "E", "W",    # pycodestyle
+    "F",         # pyflakes
+    "I",         # isort
+    "N",         # pep8-naming
+    "UP",        # pyupgrade
+    "B",         # bugbear
+    "A",         # builtins shadowing
+    "C4",        # comprehensions
+    "SIM",       # simplify
+    "TID",       # tidy imports
+    "RUF",       # ruff-specific
+    "ASYNC",     # async correctness
+    "S",         # bandit
+    "BLE",       # blind except — docs/CLAUDE.md: "No bare except"
+]
+ignore = [
+    "S101",   # assert — used in tests and in invariants
+    "B008",   # function call in default arg — FastAPI Depends() idiom
+    # Docstrings quote the specs, which use en dashes and typographic quotes. Rewriting
+    # prose to satisfy a homoglyph check would make code and docs diverge for no gain.
+    "RUF002", # ambiguous unicode in a docstring
+    "RUF003", # ambiguous unicode in a comment
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["S105", "S106"]
+"evals/*" = ["S105", "S106", "T201"]  # eval runs print their trace summary
+# NotFound/Forbidden/Conflict read correctly at the raise site and mirror the HTTP
+# vocabulary in docs/06 §3.6. An "Error" suffix would add noise, not clarity.
+"app/domain/errors.py" = ["N818"]
+"app/seed/*" = ["S311"]  # non-cryptographic RNG is the point — deterministic corpus
+"alembic/*" = ["E501"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["app"]
+
+# ---------------------------------------------------------------------------
+# Types
+# ---------------------------------------------------------------------------
+[tool.mypy]
+python_version = "3.12"
+strict = true
+warn_unreachable = true
+plugins = ["pydantic.mypy"]
+exclude = ["^alembic/versions/"]
+
+[[tool.mypy.overrides]]
+module = ["sqlite_vec.*", "jose.*", "langgraph.*", "langchain_google_genai.*"]
+ignore_missing_imports = true
+
+# ---------------------------------------------------------------------------
+# Tests
+# ---------------------------------------------------------------------------
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+addopts = "-q --strict-markers"
+markers = [
+    "live: hits the real Gemini API — opt-in, excluded from CI (docs/11 §3.4)",
+    "eval: an agent evaluation — needs a real model key (docs/19)",
+    "judged: an evaluation scored by an LLM judge, so it costs a call",
+]
+filterwarnings = ["error::DeprecationWarning:app.*"]
+
+[tool.coverage.run]
+source = ["app"]
+omit = ["app/seed/*"]

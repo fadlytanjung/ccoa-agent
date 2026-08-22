@@ -1,0 +1,28 @@
+{# Deterministic shape for an interaction summary. The model supplies the judgement
+   fields (headline, pattern, open_threads); the template supplies the structure, so
+   every summary reads the same way regardless of what the model felt like doing. #}
+**{{ customer.full_name }}** (`customer:{{ customer.customer_id }}`) — {{ interactions|length }} contact{{ '' if interactions|length == 1 else 's' }}{% if window %} over {{ window }}{% endif %}
+
+{{ headline }}
+
+## Timeline
+{% for item in interactions %}
+- **{{ item.occurred_at[:10] }}** · {{ item.channel }} · {{ item.handled_by }} — {{ item.subject }} ({{ item.sentiment }})
+  {{ item.summary }} `interaction:{{ item.interaction_id }}`
+{% endfor %}
+{% if pattern %}
+
+## Pattern
+{{ pattern }}
+{% endif %}
+{% if open_threads %}
+
+## Still open
+{% for thread in open_threads %}
+- {{ thread }}
+{% endfor %}
+{% endif %}
+{% if retrieval_method == 'keyword' %}
+
+_Retrieved by keyword search; semantic recall is unavailable, so this may not be exhaustive._
+{% endif %}

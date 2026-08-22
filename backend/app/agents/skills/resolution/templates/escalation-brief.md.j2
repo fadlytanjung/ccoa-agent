@@ -1,0 +1,31 @@
+{# Escalation transfers ownership, so the brief has to answer "what am I being asked
+   to decide?" — not merely "what happened?". #}
+**Case:** `case:{{ case.case_id }}` — {{ case.title }}
+**Customer:** {{ customer.full_name }} (`customer:{{ customer.customer_id }}`), {{ customer.tier }} tier
+**Currently:** {{ case.status }}, {{ case.priority }}{% if case.owner %}, owned by {{ case.owner }}{% endif %}
+
+**Escalating to:** {{ escalate_to }}
+**Proposed priority:** {{ priority }}
+
+## Why this is being escalated
+
+{{ reason }}
+
+## What has been done
+
+{% for step in steps_taken %}
+- {{ step }}
+{% endfor %}
+
+## Decision requested
+
+{{ decision_requested }}
+
+## Evidence
+
+{% for item in evidence %}
+- `{{ item.ref }}` — {{ item.summary }}
+{% endfor %}
+
+---
+_Escalated by {{ actor_email }} via the operations assistant._

@@ -1,0 +1,248 @@
+# Validate → test → build — docs/11 §3.2.
+#
+# Backend and frontend run as independent jobs on purpose: a frontend lint failure must
+# not block a backend change, which is what REQ-006 ("deployed independently") means in
+# pipeline terms.
+#
+# Actions are pinned to a major tag, checked against the registry rather than copied from
+# a tutorial — every version in the first draft of this file was several majors stale, and
+# a stale pin fails on the first run with an error about the runner, not about the pin.
+# A hardened setup would pin each to a full commit SHA; major tags are the deliberate
+# trade here, in exchange for security patches arriving without a PR.
+#
+# Agent evaluations are deliberately NOT here. They call a real model, cost money, and a
+# failure needs a person to judge whether the agent got worse or the expectation was wrong
+# — putting that in the merge path teaches everyone to ignore it (docs/19 §3.1).
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches-ignore: [main]
+  workflow_dispatch:
+
+# One run per branch. A force-push should cancel the run it superseded rather than pay for
+# both and report the older one second.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  PYTHON_VERSION: "3.12"
+  NODE_VERSION: "22"
+
+jobs:
+  backend:
+    name: Backend
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v10
+        with:
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+
+      - run: uv python install ${{ env.PYTHON_VERSION }}
+      - run: uv sync --locked
+
+      - name: Lint
+        run: uv run ruff check .
+
+      - name: Format
+        run: uv run ruff format --check .
+
+      - name: Types
+        run: uv run mypy app
+
+      - name: Seed the corpus
+        # The suite reads real records, and the generator is deterministic — so this
+        # produces the same corpus the tests were written against (docs/12 §3.2).
+        run: uv run python -m app.seed --reset
+
+      - name: Tests
+        run: uv run pytest -q
+
+      - name: No inline prompts
+        # Prompts belong in SKILL.md, and they drift back into Python one "just this
+        # once" at a time (docs/17 §3.9).
+        run: uv run python tools/check_no_inline_prompts.py
+
+      - name: Migrations match the models
+        run: DATABASE_URL="sqlite+pysqlite:///$(pwd)/data/app.db" uv run alembic check
+
+  frontend:
+    name: Frontend
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - run: npm ci
+
+      - name: Types
+        run: npx tsc -b --noEmit
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Unit tests
+        run: npx vitest run
+
+      - name: Build
+        run: npm run build
+
+  browser:
+    name: Browser
+    runs-on: ubuntu-latest
+    # Needs both halves working before it is worth starting a browser.
+    needs: [backend, frontend]
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: astral-sh/setup-uv@v10
+        with:
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Prepare the backend
+        working-directory: backend
+        run: |
+          uv python install ${{ env.PYTHON_VERSION }}
+          uv sync --locked
+          uv run python -m app.seed --reset
+
+      - name: Prepare the frontend
+        working-directory: frontend
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+
+      - name: Browser and phone tests
+        working-directory: frontend
+        # No GEMINI_API_KEY, so the `@live` specs skip and the shell tier still runs. A
+        # fork's pull request cannot read secrets anyway, and a suite that fails for
+        # contributors is a suite people learn to ignore (docs/19 §3.1).
+        run: npx playwright test
+
+      - name: Upload the report on failure
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: playwright-report
+          path: frontend/playwright-report/
+          retention-days: 7
+
+  containers:
+    name: Containers
+    runs-on: ubuntu-latest
+    needs: [backend, frontend]
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: docker/setup-buildx-action@v4
+
+      - name: Build the backend image
+        uses: docker/build-push-action@v7
+        with:
+          context: backend
+          # Built for the architecture the tests run on. The ARM64 image the deployment
+          # actually uses is built in deploy.yml, where a matching runner is available.
+          push: false
+          load: true
+          tags: ccoa-backend:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Verify durable replication
+        # The restore path fails silently: a container that never restores still boots,
+        # still passes both health checks, and still serves the corpus baked in at build
+        # time (ADR-007).
+        working-directory: backend
+        run: ./docker/verify-replication.sh ccoa-backend:ci
+
+      - name: Build the frontend image
+        uses: docker/build-push-action@v7
+        with:
+          context: frontend
+          push: false
+          load: true
+          tags: ccoa-frontend:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Verify what the image serves
+        # Headers and caching, asserted per location. An `add_header` inside a `location`
+        # discards every inherited one, so a CSP declared at server level can reach
+        # nothing while the config tests clean (docs/07 §3.9).
+        working-directory: frontend
+        run: ./docker/verify-image.sh ccoa-frontend:ci
+
+  terraform:
+    name: Terraform
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: "1.15.8"
+
+      - name: Format
+        working-directory: terraform
+        run: terraform fmt -check -recursive
+
+      - name: Validate
+        working-directory: terraform
+        # No credentials and no state: this validates the configuration, which is all a
+        # pull request can check without touching an account.
+        run: |
+          terraform init -backend=false -input=false
+          terraform validate
+
+  repository:
+    name: Repository
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # gitleaks scans history, and history is where a leaked key actually lives.
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: No account identifiers
+        # This repository is public, and git does not forget (docs/18 §6).
+        run: python3 tools/check_no_account_identifiers.py
+
+      - name: Implementation status is current
+        run: python3 tools/check_implementation_status.py
+
+      - name: Secret scan
+        uses: gitleaks/gitleaks-action@v3
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -1,0 +1,19 @@
+# Everything the image does not need. The corpus is generated during the build, so a
+# developer's local data/ must never be copied in — it may contain runtime writes.
+.venv/
+data/
+.env
+.env.*
+!.env.example
+tests/
+docker/README*
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+__pycache__/
+*.pyc
+*.db
+*.db-wal
+*.db-shm
+.coverage
+htmlcov/

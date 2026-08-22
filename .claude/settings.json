@@ -1,0 +1,26 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(uv run:*)",
+      "Bash(uv sync:*)",
+      "Bash(npm run:*)",
+      "Bash(npm ci:*)",
+      "Bash(terraform fmt:*)",
+      "Bash(terraform validate:*)",
+      "Bash(terraform plan:*)",
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(aws sts get-caller-identity)",
+      "Bash(aws ecs describe-services:*)",
+      "Bash(aws logs tail:*)"
+    ],
+    "ask": [
+      "Bash(terraform apply:*)",
+      "Bash(terraform destroy:*)",
+      "Bash(aws bedrock create-foundation-model-agreement:*)",
+      "Bash(aws bedrock put-use-case-for-model-access:*)",
+      "Bash(git push:*)"
+    ]
+  }
+}

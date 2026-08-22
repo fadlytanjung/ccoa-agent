@@ -1,0 +1,32 @@
+# Litestream replication — ADR-007.
+#
+# The S3 prefix is namespaced by SEED_VERSION. Without that, deploying an image with a
+# regenerated corpus would restore the *previous* generation on boot and silently
+# discard the new one (docs/12 §3.6).
+#
+# Both databases are replicated. `checkpoints.db` matters as much as `app.db`: it is
+# what makes a pending approval survive a task replacement (REQ-091).
+
+dbs:
+  - path: /data/app.db
+    replicas:
+      - type: s3
+        bucket: ${LITESTREAM_BUCKET}
+        path: litestream/${SEED_VERSION}/app.db
+        region: ${AWS_REGION}
+        # Empty in AWS, where the default endpoint is correct. Set it to point at an
+        # S3-compatible store — which is how the restore/replicate cycle is tested
+        # without provisioning a bucket (docs/08 §3.6).
+        endpoint: ${LITESTREAM_ENDPOINT}
+        # Sub-second sync, so an abrupt kill loses about a second of writes rather
+        # than a snapshot interval's worth.
+        sync-interval: 1s
+
+  - path: /data/checkpoints.db
+    replicas:
+      - type: s3
+        bucket: ${LITESTREAM_BUCKET}
+        path: litestream/${SEED_VERSION}/checkpoints.db
+        region: ${AWS_REGION}
+        endpoint: ${LITESTREAM_ENDPOINT}
+        sync-interval: 1s

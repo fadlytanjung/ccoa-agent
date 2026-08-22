@@ -1,0 +1,7 @@
+{
+  "dependencies": ["."],
+  "graphs": {
+    "ccoa": "./app/graph/studio.py:graph"
+  },
+  "env": ".env"
+}

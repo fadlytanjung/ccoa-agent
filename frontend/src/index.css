@@ -1,0 +1,418 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+/* DM Sans is bundled, not fetched from Google Fonts. The container ships a CSP with
+   `font-src 'self'`, which blocks fonts.gstatic.com outright — a page that looked fine
+   in `vite dev` would silently fall back to a system font once deployed. Self-hosting
+   also removes a third-party request from a page that displays customer records. */
+@import "@fontsource-variable/dm-sans";
+
+@custom-variant dark (&:is(.dark *));
+
+/* ============================================================
+   CCOA design tokens — primitive → semantic → component.
+   Source of truth: docs/21-design-system.md.
+
+   Use semantic or component tokens in components, never raw hex. The primitives
+   below exist to define the system; a component that reaches past the semantic
+   layer to a `--ccoa-*` value has hard-coded a decision the system owns.
+   ============================================================ */
+
+:root {
+  /* --- Primitive values (system only; do not use directly) --- */
+  --ccoa-green-400: #00ed64;
+  --ccoa-green-500: #00b545;
+  --ccoa-green-600: #008c34;
+  --ccoa-green-700: #00684a;
+  --ccoa-green-soft: #c3f0d2;
+  --ccoa-teal-950: #001e2b;
+  --ccoa-teal-800: #003d4f;
+  --ccoa-teal-600: #00684a;
+  --ccoa-white: #ffffff;
+  --ccoa-surface-default: #f9fbfa;
+  --ccoa-surface-soft: #f4f7f6;
+  --ccoa-surface-feature: #e3fcef;
+  --ccoa-hairline: #e1e5e8;
+
+  /* --- Semantic: brand --- */
+  --brand-green: var(--ccoa-green-400);
+  --brand-green-hover: var(--ccoa-green-500);
+  --brand-green-pressed: var(--ccoa-green-600);
+  --brand-green-dark: var(--ccoa-green-700);
+  --brand-green-soft: var(--ccoa-green-soft);
+  --brand-teal-deep: var(--ccoa-teal-950);
+  --brand-teal: var(--ccoa-teal-800);
+  --brand-teal-mid: var(--ccoa-teal-600);
+
+  /* --- Semantic: surfaces --- */
+  --surface-canvas: var(--ccoa-white);
+  --surface-default: var(--ccoa-surface-default);
+  --surface-soft: var(--ccoa-surface-soft);
+  --surface-feature: var(--ccoa-surface-feature);
+  --surface-dark: var(--ccoa-teal-950);
+  --surface-overlay: var(--ccoa-white);
+  --surface-scrim: rgba(0, 30, 43, 0.56);
+
+  /* --- Semantic: text --- */
+  --text-primary: #001e2b;
+  --text-secondary: #3d4f5b;
+  --text-tertiary: #5c6c7a;
+  --text-muted: #7c8c9a;
+  --text-on-primary: #001e2b;
+  --text-on-dark: #ffffff;
+  --text-on-dark-muted: #a8b3bc;
+
+  /* --- Semantic: borders --- */
+  --border-default: var(--ccoa-hairline);
+  --border-soft: #eceff1;
+  --border-strong: #c1ccd6;
+  --border-dark: #1c2d38;
+  --border-focus: var(--ccoa-green-700);
+
+  /* --- Semantic: status (always paired with text + icon) --- */
+  --semantic-positive: #318266;
+  --semantic-positive-bg: #dceee7;
+  --semantic-positive-text: #155641;
+  --semantic-warning: #d79a2b;
+  --semantic-warning-bg: #fff8e0;
+  --semantic-warning-text: #714900;
+  --semantic-danger: #c95746;
+  --semantic-danger-bg: #f4ded9;
+  --semantic-danger-text: #7d3025;
+  --semantic-unknown: #5c6c7a;
+  --semantic-unknown-bg: #f4f7f6;
+  --semantic-unknown-text: #3d4f5b;
+
+  /* --- Spacing scale (4px base, 8px increments) --- */
+  --space-xxs: 4px;
+  --space-xs: 8px;
+  --space-sm: 12px;
+  --space-md: 16px;
+  --space-lg: 20px;
+  --space-xl: 24px;
+  --space-2xl: 32px;
+  --space-3xl: 40px;
+  --space-section-sm: 48px;
+  --space-section: 64px;
+
+  /* --- Radius scale --- */
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+  --radius-2xl: 24px;
+
+  /* --- Elevation --- */
+  --shadow-subtle: 0 1px 2px rgba(0, 30, 43, 0.04);
+  --shadow-raised: 0 4px 12px rgba(0, 30, 43, 0.08);
+  --shadow-preview: 0 12px 24px -4px rgba(0, 30, 43, 0.12);
+  --shadow-overlay: 0 16px 48px -8px rgba(0, 30, 43, 0.16);
+
+  /* --- Motion (durations and easings are tokens too) --- */
+  --motion-press: 100ms;
+  --motion-interactive: 180ms;
+  --motion-reveal: 260ms;
+  --motion-emphasis: 420ms;
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --ease-enter: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-exit: cubic-bezier(0.4, 0, 1, 1);
+
+  /* --- Workspace layout ---
+     Proportional with hard stops, not fixed pixels: on a 1440px screen this is roughly
+     18% / 60% / 22%. The rails are supporting context and must never out-weigh the
+     conversation, which is the actual work. The `max` matters most — a conversation list
+     is full of long titles, and without a ceiling the rail grows to fit the worst one. */
+  --rail-width: clamp(216px, 18vw, 280px);
+  --context-width: clamp(272px, 22vw, 340px);
+  --header-height: 80px;
+
+  /* --- shadcn/ui aliases (map onto CCOA semantics) --- */
+  --background: var(--surface-canvas);
+  --foreground: var(--text-primary);
+  --card: var(--surface-canvas);
+  --card-foreground: var(--text-primary);
+  --popover: var(--surface-overlay);
+  --popover-foreground: var(--text-primary);
+  --primary: var(--brand-green);
+  --primary-foreground: var(--text-on-primary);
+  --secondary: var(--surface-soft);
+  --secondary-foreground: var(--text-primary);
+  --muted: var(--surface-soft);
+  --muted-foreground: var(--text-muted);
+  --accent: var(--surface-feature);
+  --accent-foreground: var(--text-primary);
+  --destructive: var(--semantic-danger);
+  --destructive-foreground: #ffffff;
+  --border: var(--border-default);
+  --input: var(--border-strong);
+  --ring: var(--border-focus);
+}
+
+.dark {
+  --surface-canvas: var(--ccoa-teal-950);
+  --surface-default: #06242f;
+  --surface-soft: #082b35;
+  --surface-feature: #06342c;
+  --surface-overlay: #06242f;
+  --text-primary: #ffffff;
+  --text-secondary: #c3cdd3;
+  --text-tertiary: #a8b3bc;
+  --text-muted: #8b99a3;
+  --border-default: #1c2d38;
+  --border-soft: #16252e;
+  --border-strong: #2a3d49;
+  --border-focus: var(--ccoa-green-400);
+  --semantic-warning-bg: #33280a;
+  --semantic-warning-text: #f5d68a;
+  --semantic-danger-bg: #3a1c17;
+  --semantic-danger-text: #f2b3a7;
+  --semantic-positive-bg: #0d2b22;
+  --semantic-positive-text: #8fd9be;
+  --semantic-unknown-bg: #10242c;
+  --semantic-unknown-text: #a8b3bc;
+  --background: var(--surface-canvas);
+  --foreground: var(--text-primary);
+  --card: var(--surface-default);
+  --card-foreground: var(--text-primary);
+  --popover: var(--surface-overlay);
+  --popover-foreground: var(--text-primary);
+  --secondary: var(--surface-soft);
+  --secondary-foreground: var(--text-primary);
+  --muted: var(--surface-soft);
+  --muted-foreground: var(--text-muted);
+  --accent: var(--surface-feature);
+  --accent-foreground: var(--text-primary);
+  --border: var(--border-default);
+  --input: var(--border-strong);
+  --ring: var(--border-focus);
+}
+
+@theme inline {
+  /* "DM Sans Variable" is the family name the @fontsource-variable package registers;
+     plain "DM Sans" matches nothing and falls through to the system stack. */
+  --font-sans: "DM Sans Variable", "DM Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "DM Sans Variable", "DM Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+
+  /* color utilities (bg-, text-, border-) */
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  --color-surface: var(--surface-default);
+  --color-surface-soft: var(--surface-soft);
+  --color-surface-feature: var(--surface-feature);
+  --color-surface-dark: var(--surface-dark);
+  --color-surface-overlay: var(--surface-overlay);
+  --color-surface-scrim: var(--surface-scrim);
+
+  --color-brand-green: var(--brand-green);
+  --color-brand-green-hover: var(--brand-green-hover);
+  --color-brand-green-pressed: var(--brand-green-pressed);
+  --color-brand-green-dark: var(--brand-green-dark);
+  --color-brand-green-soft: var(--brand-green-soft);
+  --color-brand-teal-deep: var(--brand-teal-deep);
+  --color-brand-teal: var(--brand-teal);
+  --color-brand-teal-mid: var(--brand-teal-mid);
+
+  --color-text-secondary: var(--text-secondary);
+  --color-text-tertiary: var(--text-tertiary);
+  --color-text-on-dark: var(--text-on-dark);
+  --color-text-on-dark-muted: var(--text-on-dark-muted);
+
+  --color-border-soft: var(--border-soft);
+  --color-border-strong: var(--border-strong);
+  --color-border-dark: var(--border-dark);
+  --color-semantic-positive: var(--semantic-positive);
+  --color-semantic-positive-bg: var(--semantic-positive-bg);
+  --color-semantic-positive-text: var(--semantic-positive-text);
+  --color-semantic-warning: var(--semantic-warning);
+  --color-semantic-warning-bg: var(--semantic-warning-bg);
+  --color-semantic-warning-text: var(--semantic-warning-text);
+  --color-semantic-danger: var(--semantic-danger);
+  --color-semantic-danger-bg: var(--semantic-danger-bg);
+  --color-semantic-danger-text: var(--semantic-danger-text);
+  --color-semantic-unknown: var(--semantic-unknown);
+  --color-semantic-unknown-bg: var(--semantic-unknown-bg);
+  --color-semantic-unknown-text: var(--semantic-unknown-text);
+
+  /* spacing utilities (p-, gap-, m-) */
+  --spacing-xxs: var(--space-xxs);
+  --spacing-xs: var(--space-xs);
+  --spacing-sm: var(--space-sm);
+  --spacing-md: var(--space-md);
+  --spacing-lg: var(--space-lg);
+  --spacing-xl: var(--space-xl);
+  --spacing-2xl: var(--space-2xl);
+  --spacing-3xl: var(--space-3xl);
+  --spacing-section-sm: var(--space-section-sm);
+  --spacing-section: var(--space-section);
+
+  /* radius utilities */
+  --radius-xs: var(--radius-xs);
+  --radius-sm: var(--radius-sm);
+  --radius-md: var(--radius-md);
+  --radius-lg: var(--radius-lg);
+  --radius-xl: var(--radius-xl);
+  --radius-2xl: var(--radius-2xl);
+
+  /* elevation utilities */
+  --shadow-subtle: var(--shadow-subtle);
+  --shadow-raised: var(--shadow-raised);
+  --shadow-preview: var(--shadow-preview);
+  --shadow-overlay: var(--shadow-overlay);
+}
+
+/* ============================================================
+   Composite typography utilities (size + weight + line-height + tracking).
+   Always pair with a colour utility: `text-heading-2 text-foreground`.
+   Never assemble a type style from separate size and weight utilities.
+   ============================================================ */
+@layer components {
+  .text-heading-1 { font-size: clamp(28px, 4vw, 40px); font-weight: 500; line-height: 1.2; letter-spacing: -0.5px; }
+  .text-heading-2 { font-size: clamp(24px, 3vw, 32px); font-weight: 500; line-height: 1.25; letter-spacing: -0.5px; }
+  .text-heading-3 { font-size: 24px; font-weight: 500; line-height: 1.3; }
+  .text-heading-4 { font-size: 20px; font-weight: 500; line-height: 1.35; }
+  .text-heading-5 { font-size: 17px; font-weight: 600; line-height: 1.4; }
+  .text-subtitle { font-size: 17px; font-weight: 400; line-height: 1.5; }
+  .text-body { font-size: 16px; font-weight: 400; line-height: 1.55; }
+  .text-body-medium { font-size: 16px; font-weight: 500; line-height: 1.55; }
+  .text-body-sm { font-size: 14px; font-weight: 400; line-height: 1.5; }
+  .text-body-sm-medium { font-size: 14px; font-weight: 500; line-height: 1.5; }
+  .text-caption { font-size: 13px; font-weight: 400; line-height: 1.4; }
+  .text-caption-bold { font-size: 13px; font-weight: 600; line-height: 1.4; }
+  .text-micro { font-size: 12px; font-weight: 500; line-height: 1.4; }
+  .text-micro-uppercase { font-size: 11px; font-weight: 600; line-height: 1.4; letter-spacing: 1px; text-transform: uppercase; }
+  .text-button { font-size: 14px; font-weight: 600; line-height: 1.3; }
+  .text-code { font-size: 13px; font-weight: 400; line-height: 1.5; font-family: var(--font-mono); }
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  /* The document itself never scrolls. The app is a fixed-height shell — header, rails,
+     composer — with exactly one scrolling region inside it, the message list.
+
+     Without this the containment is *emergent*: it holds only while every flex ancestor
+     of the scroller keeps `min-height: 0`, and a single missing one anywhere in the chain
+     lets the whole layout grow and take the header and composer off screen with it. That
+     is a rule nobody can be expected to maintain by inspection, so it is enforced here
+     instead. `e2e/mobile.spec.ts` and `assistant.spec.ts` both assert it. */
+  overflow: hidden;
+}
+
+body {
+  margin: 0;
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  /* The composer is fixed to the bottom on mobile; without this the iOS keyboard
+     scrolls the whole document instead of the message list. */
+  overscroll-behavior-y: none;
+}
+
+/* ============================================================
+   Streaming motion — docs/21 §6.
+
+   The agent's work is invisible without it: a graph turn is several seconds of
+   silence, and silence reads as a hang. Each animation below marks one real state
+   change (a token arrived, a tool ran, a turn ended). None of them are decorative,
+   and all of them stop under `prefers-reduced-motion` while the information they
+   carry stays on the page.
+   ============================================================ */
+
+/* The caret that trails streamed text, so a partial answer looks in progress rather
+   than truncated. */
+@keyframes caret-blink {
+  0%, 45% { opacity: 1; }
+  55%, 100% { opacity: 0; }
+}
+.stream-caret {
+  display: inline-block;
+  width: 2px;
+  height: 1.05em;
+  margin-left: 2px;
+  vertical-align: -0.15em;
+  background: var(--brand-green-dark);
+  animation: caret-blink 1s steps(1, end) infinite;
+}
+
+/* "Thinking" — used only before the first token, never alongside real output. */
+.thinking-dots span {
+  display: inline-block;
+  height: 6px;
+  width: 6px;
+  margin: 0 2px;
+  border-radius: 9999px;
+  background: var(--text-tertiary);
+  animation: bounce-dot 1.2s infinite;
+}
+.thinking-dots span:nth-child(2) { animation-delay: 0.15s; }
+.thinking-dots span:nth-child(3) { animation-delay: 0.3s; }
+@keyframes bounce-dot {
+  0%, 60%, 100% { transform: translateY(0); opacity: 0.45; }
+  30% { transform: translateY(-4px); opacity: 1; }
+}
+
+/* A tool call in flight. The ring pulses only while the call is open, so a stalled
+   tool is visibly different from a finished one. */
+@keyframes pulse-ring {
+  0% { box-shadow: 0 0 0 0 rgba(0, 237, 100, 0.4); }
+  70% { box-shadow: 0 0 0 8px rgba(0, 237, 100, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(0, 237, 100, 0); }
+}
+.tool-running { animation: pulse-ring 1.8s ease-out infinite; }
+
+/* The activity trail's vertical progress line, drawn as steps arrive. */
+@keyframes draw-line {
+  from { transform: scaleY(0); }
+  to { transform: scaleY(1); }
+}
+.trail-line {
+  transform-origin: top;
+  animation: draw-line var(--motion-reveal) var(--ease-enter);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .stream-caret,
+  .thinking-dots span,
+  .tool-running,
+  .trail-line {
+    animation: none !important;
+  }
+  /* The caret still marks the insertion point; it simply stops blinking. */
+  .stream-caret { opacity: 1; }
+  html { scroll-behavior: auto; }
+}
+
+/* Focus is visible everywhere, and never removed without a replacement.
+   In `@layer base` on purpose: Tailwind's utilities layer outranks base, so a component
+   that draws focus on its *wrapper* — the composer, and every input inside a bordered
+   box — can opt out with `outline-none` and get one ring instead of two nested ones.
+   Unlayered, this rule outranked those utilities and every such input drew a second
+   outline inside the border that was already highlighting. */
+@layer base {
+  :focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
+}

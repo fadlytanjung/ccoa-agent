@@ -1,0 +1,34 @@
+{# The payload a human approves and the payload the graph writes are rendered from
+   this one template, so what was agreed is exactly what is saved (docs/05 §3.7). #}
+**Customer:** {{ customer.full_name }} (`customer:{{ customer.customer_id }}`)
+{% if case %}**Case:** `case:{{ case.case_id }}` — {{ case.title }} ({{ case.status }}, {{ case.priority }})
+{% endif %}
+{% if claim %}**Claim:** `claim:{{ claim.claim_id }}` — {{ claim.status }}{% if claim.failure_code %} / `{{ claim.failure_code }}`{% endif %}
+{% endif %}
+**Priority:** {{ priority }}
+**Category:** {{ category }}
+
+## Problem
+
+{{ problem }}
+
+## Evidence
+
+{% for item in evidence %}
+- `{{ item.ref }}` — {{ item.summary }}
+{% endfor %}
+
+## Requested action
+
+{{ next_action }}
+{% if already_attempted %}
+
+## Already attempted
+
+{% for attempt in already_attempted %}
+- {{ attempt }}
+{% endfor %}
+{% endif %}
+
+---
+_Drafted by the operations assistant from the evidence above. Raised by {{ actor_email }}._

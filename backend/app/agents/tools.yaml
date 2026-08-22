@@ -1,0 +1,102 @@
+# Tool descriptions — the text the model reads when deciding what to call.
+#
+# These live here, not in Python docstrings, for the same reason system prompts do
+# (docs/17 §3.9): a tool description is a behavioural specification that changes far
+# more often than the function under it, and it should be reviewable as prose rather
+# than buried in a .py file. The tool registry fails at boot if a registered tool has
+# no entry here, or if an entry has no tool — so the two cannot drift apart.
+#
+# Keep them short. Every description of every tool bound to a skill rides in that
+# skill's prompt on every call.
+
+search_customer:
+  summary: Find customers by name, email address, or customer ID.
+  description: >
+    Find customers by name, email address, or customer ID. Returns EVERY match, not the
+    best one — if two people share a name you get both, and choosing between them is a
+    question for the human, not a guess for you. Returns an empty list when nothing
+    matches, which is a valid answer.
+
+get_customer:
+  summary: Full profile for one customer, including their policies.
+  description: >
+    Full profile for one customer: contact details, tier, status, every policy with its
+    product and state, and counts of open cases and recorded interactions. Use this once
+    the customer ID is known. It already includes policies, so do not follow it with a
+    separate policy lookup.
+
+list_interactions:
+  summary: Past contacts for a customer, most recent first.
+  description: >
+    Past contacts for a customer — voice, chat, email, callback — most recent first.
+    Returns summaries, not transcripts: the summary is written for exactly this purpose
+    and a transcript is two kilobytes of dialogue for one fact. Use `since` to bound the
+    range and `limit` to bound the volume.
+
+search_interactions:
+  summary: Find a customer's past contacts about a specific topic.
+  description: >
+    Find a customer's past contacts about a specific topic, ranked by relevance rather
+    than date. Always scoped to the one customer given. Uses semantic search when it is
+    available and keyword matching otherwise; the result says which ran, and keyword
+    matching means absence of a hit is weaker evidence.
+
+list_claims:
+  summary: Claims belonging to a customer, optionally filtered by status.
+  description: >
+    Claims belonging to a customer, newest first, optionally filtered by status. Pass
+    status='submission_failed' to find claims that never reached assessment — that is
+    the usual starting point for a failed-submission investigation.
+
+get_claim:
+  summary: One claim in full, including its failure code.
+  description: >
+    One claim in full, including `failure_code` and `failure_detail` when the submission
+    failed. The failure code is the authoritative fact about what went wrong; where the
+    customer's description and the code disagree, the code is what happened.
+
+list_cases:
+  summary: Support cases for a customer, optionally filtered by status.
+  description: >
+    Support cases for a customer, newest first. Pass status='open' for cases still in
+    progress. A case is the customer's problem over time; a ticket is a unit of work
+    against it, and one case can have several or none.
+
+get_case:
+  summary: One case in full, with its event timeline and linked records.
+  description: >
+    One case in full, with its chronological event history and the identifiers of every
+    linked ticket and interaction. Use it to find out whether a problem is already known
+    and who owns it, before proposing new work.
+
+search_kb:
+  summary: Search the internal knowledge base for remediation guidance.
+  description: >
+    Search the internal knowledge base for remediation guidance. Search by failure code
+    for the documented fix — pass the code itself, such as DOC_UNREADABLE, rather than a
+    paraphrase. If nothing matches, say the code is not covered rather than improvising
+    a plausible-sounding process.
+
+read_reference:
+  summary: Read one of your own reference documents by path.
+  description: >
+    Read one of your own reference documents. Pass only the path exactly as it appears
+    in your instructions, such as references/failure-codes.md — which document set you
+    are reading from is already known. Use it when you hit something your main
+    instructions do not cover, not as a matter of routine: the documents are long and
+    you are already told the common cases.
+
+create_ticket:
+  summary: Create a support ticket. Reachable only after human approval.
+  description: >
+    Create a support ticket. Never bound to a model — it is invoked by the graph after a
+    human has approved a drafted proposal, and requires the 'agent' group. Listed here
+    so the registry can describe it, not so it can be called.
+
+escalate_case:
+  summary: Escalate a case to another team. Reachable only after human approval.
+  description: >
+    Escalate a case, transferring ownership to another team. Never bound to a model — it
+    is invoked by the graph after a human has approved a drafted proposal, and requires
+    the 'supervisor' group. Listed here so the registry can describe it, not so it can
+    be called.
