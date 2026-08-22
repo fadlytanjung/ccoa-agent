@@ -185,6 +185,24 @@ misconfigured cache behaviour or a dropped `Authorization` header would show up 
 
 ### 3.7 Branch and environment mapping
 
+**Amended 2026-08-23.** `develop` deploys, `main` does not, which is the reverse of the
+convention and worth explaining rather than discovering.
+
+| Branch | Holds | Deploys |
+|---|---|---|
+| `main` | The architecture the design argues for — CloudFront edge, internal ALB | **No.** AWS will not create the distribution until the account is verified ([09](09-networking.md) §6.6) |
+| `develop` | The same Terraform with `edge = "alb"` | **Yes**, to `dev` |
+
+The rule underneath is the one that matters: **one branch owns an environment.** Both
+branches share a state file, so triggering the deploy from both means whichever pushed
+last rewrites the environment in its own image. That is not theoretical — a deploy from
+`main` reached the build step before being cancelled, and its next action would have been
+to replace the working load balancer and then fail at CloudFront, leaving nothing serving.
+
+When the account clears, `main` becomes deployable and the trigger moves back with it.
+
+
+
 | Branch | Environment | Behaviour |
 |---|---|---|
 | feature branches | none | `ci.yml` only — validate, test, build, plan |
