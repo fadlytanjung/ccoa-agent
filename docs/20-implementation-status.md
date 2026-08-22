@@ -59,7 +59,7 @@ if it broke is **Partial** at best.
 | SQLite schema + 3 Alembic revisions | **Built** | Head `0003_threads`, asserted at startup |
 | Deterministic seed corpus | **Built** | [12](12-seed-data.md) |
 | Vector search (`sqlite-vec`) | **Partial** | Wired and migrated; retrieval paths are the least-covered code in the suite (45%) |
-| Cognito JWT verification, JWKS cache failing closed | **Partial** | Unit-tested, and a real pool now exists — but **no token from it has yet reached the API** |
+| Cognito JWT verification, JWKS cache failing closed | **Built** | Verified end to end: a real access token from the deployed pool reaches the API, is validated against the pool's JWKS, and the agent answers |
 | Authorisation by group claim, audit rows on mutation | **Built** | [10](10-security.md) |
 | Litestream → S3 durability | **Built** | Verified end-to-end against MinIO, not against S3 ([ADR-007](adr/ADR-007-durable-sqlite-via-s3.md)) |
 | Container image, entrypoint, restore-on-boot | **Built** | `backend/docker/verify-replication.sh` |
@@ -78,7 +78,7 @@ if it broke is **Partial** at best.
 | Markdown rendering, no raw HTML | **Built** | |
 | Approval card — all four ask kinds | **Built** | 11 component tests |
 | Context panel with citation focus | **Built** | |
-| Cognito PKCE, explicit endpoints, hand-built sign-out | **Partial** | Verified as far as the login page: the SPA redirects to the real hosted UI, which renders a sign-in form **with no sign-up link**. **No token has completed the round trip** — that needs a user with a password |
+| Cognito PKCE, explicit endpoints, hand-built sign-out | **Built** | The whole round trip completes against the deployed environment: redirect, credentials, code exchange, workspace |
 | `AUTH_MODE=dev` bypass, mirroring the server | **Built** | |
 | nginx container: SPA fallback, CSP, caching, non-root | **Built** | 30 assertions in `docker/verify-image.sh` |
 | Generated API types from OpenAPI | **Specified** | [06](06-backend-api.md) §3.10. Types are hand-written; drift is caught by tests, not the compiler |
@@ -106,7 +106,7 @@ if it broke is **Partial** at best.
 | AWS bootstrap script | **Built** | `scripts/aws-bootstrap.sh`. **Executed** — state bucket, GitHub OIDC provider, permission boundary, and `ccoa-deploy` role all exist |
 | `scripts/deploy.sh`, `destroy.sh` | **Partial** | Written and exercised step by step by hand; **not yet run end to end**, because the CloudFront step cannot complete |
 | Cognito provisioning script | **Built** | `scripts/aws-cognito.sh`. **Executed against the real account** — pool, groups, domain, and public client exist in `ap-southeast-1`, self-registration disabled ([ops-log](ops-log.md), [ADR-008](adr/ADR-008-provisioned-identity.md)) |
-| Deployed environment | **Built** | `dev` is live on an internet-facing ALB. SPA served, `/api/*` routed, anonymous requests `401`, HTTP redirects to HTTPS, security headers present, and the Cognito hosted UI reached from the deployed origin — all verified against the running environment |
+| Deployed environment | **Built** | `dev` is live on an internet-facing ALB. **A full sign-in completes and the agent answers through the deployed stack** — verified with a real Cognito user against the running environment, with no console errors |
 | Viewer TLS | **Partial** | A **self-signed** certificate, so every visitor sees a browser warning. Cognito rejects `http://` callbacks, so this was the only way to have working sign-in without a domain. A real certificate is one variable and ~15 minutes ([09](09-networking.md) §6.6) |
 
 **The headline:** `dev` is **deployed and reachable**, on `develop`. The CloudFront edge
@@ -176,9 +176,10 @@ Ordered by how much they would matter if this were going further.
 2. **Neither workflow has ever run.** The repository has **no commits** — `ci.yml` and
    `deploy.yml` are code that has never been executed by GitHub. Expect the first push to
    find something; that is what first pushes do.
-3. **No token from the real pool has reached the API yet.** The SPA redirects to the real
-   hosted UI and the login form renders, and an unauthenticated `GET /api/v1/threads`
-   correctly returns `401` — but the round trip — sign in, exchange the code, call `/api/v1/threads` with
+3. ~~**No token from the real pool has reached the API yet.**~~ **Closed 2026-08-23** —
+   a full sign-in now completes against the deployed environment. What follows is kept
+   only as the record: the SPA redirects to the real hosted UI and the login form renders,
+   and an unauthenticated `GET /api/v1/threads` correctly returns `401`; the round trip — sign in, exchange the code, call `/api/v1/threads` with
    the access token, have the backend verify it against the real JWKS — has not been
    completed. That is the single highest-value thing left to try, and it needs one command
    (`--add-user`) plus a browser.

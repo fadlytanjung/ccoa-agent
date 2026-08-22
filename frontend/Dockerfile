@@ -14,7 +14,8 @@ FROM nginx:stable-alpine AS runtime
 
 COPY --from=build /app/dist /usr/share/nginx/html
 COPY nginx.conf /etc/nginx/conf.d/default.conf
-COPY nginx-security-headers.conf /etc/nginx/security-headers.conf
+COPY nginx-security-headers.conf /etc/nginx/security-headers.conf.template
+COPY docker/25-csp.sh /docker-entrypoint.d/25-csp.sh
 
 # Port 8080 and a non-root user, so the task definition needs no added capabilities.
 # Everything nginx writes then has to live somewhere the `nginx` user owns. The pidfile
@@ -34,9 +35,16 @@ RUN sed -i -E 's|^pid .*;|pid /var/cache/nginx/nginx.pid;|' /etc/nginx/nginx.con
  && grep -q '^pid /var/cache/nginx/nginx.pid;' /etc/nginx/nginx.conf \
  && sed -i '/^user /d' /etc/nginx/nginx.conf \
  && rm -f /docker-entrypoint.d/10-listen-on-ipv6-by-default.sh \
+ && chmod +x /docker-entrypoint.d/25-csp.sh \
+ # A default is generated at build time so `nginx -t` below has something to include,
+ # and so an image whose entrypoint never runs still serves a restrictive policy rather
+ # than failing to start.
+ && mkdir -p /etc/nginx/generated \
+ && sed "s|@CSP_CONNECT_SRC@|'self'|g" /etc/nginx/security-headers.conf.template \
+      > /etc/nginx/generated/security-headers.conf \
  && nginx -t \
  && rm -f /var/cache/nginx/nginx.pid \
- && chown -R nginx:nginx /usr/share/nginx/html /var/cache/nginx
+ && chown -R nginx:nginx /usr/share/nginx/html /var/cache/nginx /etc/nginx/generated
 
 USER nginx
 EXPOSE 8080
