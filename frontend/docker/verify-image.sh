@@ -86,13 +86,38 @@ for path in "/" "$asset" "/healthz"; do
   expect "$headers" "permissions-policy" "Permissions-Policy is sent for ${path}"
 done
 
-expect "$(curl -sI "${BASE}/")" "connect-src 'self'" "the CSP confines API calls to same-origin"
+expect "$(curl -sI "${BASE}/")" "connect-src 'self'" "the CSP allows same-origin API calls"
+
+# The default must stay restrictive: an image started with no configuration should not
+# be able to reach anything but itself.
+expect_eq "$(curl -sI "${BASE}/" | grep -oiE "connect-src [^;]+" | tr -d "\r")" \
+  "connect-src 'self'" "connect-src defaults to same-origin only"
 
 # --- it caches correctly ---------------------------------------------------------
 expect "$(curl -sI "${BASE}/")" "cache-control: no-store" "index.html is never cached"
 asset_cc="$(curl -sI "${BASE}${asset}" | grep -ci '^cache-control')"
 expect_eq "$asset_cc" "1" "the bundle carries exactly one Cache-Control"
 expect "$(curl -sI "${BASE}${asset}")" "immutable" "the bundle is cached immutably"
+
+# --- the CSP can be widened for the identity provider, and only for it -------------
+#
+# `connect-src 'self'` alone silently breaks sign-in: the PKCE token exchange is a
+# browser fetch to Cognito, and the policy refuses it *after* the redirect has already
+# succeeded. That shipped once. This asserts the substitution works, so a broken
+# entrypoint cannot quietly restore the default.
+info "restarting with CSP_CONNECT_SRC set"
+docker rm -f "$NAME" >/dev/null 2>&1
+docker run -d --name "$NAME" -p "${PORT}:8080" \
+  -e "CSP_CONNECT_SRC='self' https://example.auth.ap-southeast-1.amazoncognito.com" \
+  "$IMAGE" >/dev/null
+
+for _ in $(seq 1 40); do sleep 0.5; curl -sf -o /dev/null "${BASE}/healthz" && break; done
+
+csp="$(curl -sI "${BASE}/" | grep -oiE "connect-src [^;]+" | tr -d '\r')"
+expect "$csp" "amazoncognito.com" "connect-src accepts a configured identity provider"
+expect "$csp" "'self'" "...while still allowing same-origin"
+expect_eq "$(grep -c 'amazonaws.com' <<<"$csp" || true)" "0" \
+  "...and nothing that was not configured"
 
 # --- it runs as it will on Fargate ------------------------------------------------
 expect_eq "$(docker exec "$NAME" id -un)" "nginx" "nginx runs as a non-root user"

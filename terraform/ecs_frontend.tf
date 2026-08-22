@@ -23,9 +23,25 @@ resource "aws_ecs_task_definition" "frontend" {
 
     portMappings = [{ containerPort = 8080, protocol = "tcp" }]
 
-    # No environment and no secrets. The SPA learns everything it needs at runtime from
-    # the backend's public `/api/v1/config`, which is what lets one image serve every
-    # environment without a rebuild (docs/07 §3.9).
+    # One variable, and only because CSP is enforced by nginx rather than by the SPA, so
+    # it cannot come from `/api/v1/config` like everything else does.
+    #
+    # These are the exact hosts the PKCE flow contacts from the browser: `/oauth2/token`
+    # and `/oauth2/revoke` on the hosted UI domain, and the pool's JWKS on the identity
+    # host. Named individually rather than wildcarded — `https://*.amazonaws.com` would
+    # let an injected script reach every AWS service endpoint there is.
+    environment = [{
+      name = "CSP_CONNECT_SRC"
+      value = join(" ", [
+        "'self'",
+        "https://${aws_cognito_user_pool_domain.main.domain}.auth.${var.region}.amazoncognito.com",
+        "https://cognito-idp.${var.region}.amazonaws.com",
+      ])
+    }]
+
+    # No secrets. The SPA learns everything else at runtime from the backend's public
+    # `/api/v1/config`, which is what lets one image serve every environment without a
+    # rebuild (docs/07 §3.9).
 
     healthCheck = {
       command     = ["CMD-SHELL", "wget -qO- http://localhost:8080/healthz || exit 1"]

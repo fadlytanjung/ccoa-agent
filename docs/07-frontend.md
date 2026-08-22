@@ -345,6 +345,14 @@ non-root user. ARM64 to match the Fargate task architecture ([02](02-research.md
   is promotable across environments.
 - Fonts are **bundled**, not fetched from a CDN: the CSP sets `font-src 'self'`, which
   blocks Google Fonts silently.
+- **`connect-src` names the identity provider.** PKCE exchanges its authorization code by
+  POSTing to Cognito's `/oauth2/token` *from the browser*, so `connect-src 'self'` refuses
+  it — after the redirect has already succeeded, which makes it look like a network fault
+  rather than a policy one. The two Cognito hosts are substituted into the header at
+  container start (`docker/25-csp.sh`) from an environment variable the task definition
+  supplies; the default stays `'self'`, so an unconfigured image is still locked down.
+  Neither host is wildcarded: `https://*.amazonaws.com` would open every AWS endpoint
+  there is.
 
 #### The container is verified, not assumed
 
@@ -456,6 +464,7 @@ short page.
 | Silent renew replaces the token | `addUserLoaded` | The session object is updated; without the subscription every call 401s after an hour, which is exactly when nobody is watching |
 | A message typed during an open checkpoint | `state.pending` is set | The composer answers the checkpoint, or is disabled — it never posts to a suspended graph ([§3.6a](#36a-where-a-free-text-answer-is-typed)) |
 | Security headers silently absent | Nothing — a clean 200 | `docker/verify-image.sh` asserts them per location ([§3.9](#39-build-and-container)) |
+| **`connect-src 'self'` blocks the token exchange** | Sign-in redirects back, then "Failed to fetch" | The CSP names the identity provider's hosts explicitly, substituted at container start. Invisible in development, where Vite sends no CSP at all ([§3.9](#39-build-and-container)) |
 
 ## 6. Open questions
 
