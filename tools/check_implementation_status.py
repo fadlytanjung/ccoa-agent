@@ -160,6 +160,11 @@ def _run(command: list[str], cwd: Path) -> str:
 
 
 def count_backend_tests() -> int | str | None:
+    # Same reasoning as the frontend: an absent virtualenv is a missing toolchain, not a
+    # stale document.
+    if not (ROOT / "backend" / ".venv").exists():
+        return UNAVAILABLE
+
     output = _run(["uv", "run", "pytest", "--collect-only", "-q"], ROOT / "backend")
     if output == UNAVAILABLE:
         return UNAVAILABLE
@@ -175,6 +180,13 @@ def count_backend_tests() -> int | str | None:
 
 
 def count_frontend_tests() -> int | str | None:
+    # `npx vitest list` without an install does not fail cleanly — it tries to fetch
+    # vitest, then errors in a way that produces output but no test list, which this tool
+    # then reported as "could not determine the count — fix the checker". The dependency
+    # is what is missing, not the parse, and the two want different answers.
+    if not (ROOT / "frontend" / "node_modules" / "vitest").exists():
+        return UNAVAILABLE
+
     output = _run(["npx", "vitest", "list"], ROOT / "frontend")
     if output == UNAVAILABLE:
         return UNAVAILABLE

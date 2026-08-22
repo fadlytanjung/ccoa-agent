@@ -16,6 +16,34 @@ from app.db.engine import Database
 from app.seed import clear, generate, write
 from app.seed.generator import SEED, SEED_VERSION
 
+#: `backend/`, from `backend/app/seed/__main__.py`.
+BACKEND_ROOT = Path(__file__).resolve().parents[2]
+
+
+def ensure_schema(db_path: Path) -> None:
+    """Bring the database to the migration head before touching a row.
+
+    docs/12 §3.7 says "migrate, then seed", and until now that ordering lived only in the
+    Dockerfile. Every other caller — `scripts/dev.sh` on a fresh clone, both CI workflows,
+    a contributor following the getting-started guide — ran the seed against a database
+    with no tables and got `no such table: ticket_event` from three frames deep in
+    SQLAlchemy, which names neither the cause nor the fix.
+
+    Doing it here makes the ordering a property of the command rather than a thing each
+    caller has to remember.
+    """
+    # Imported lazily: alembic is only needed for this, and `--dry-run` should not pay for
+    # it just to print counts.
+    from alembic import command
+    from alembic.config import Config
+
+    config = Config(str(BACKEND_ROOT / "alembic.ini"))
+    # Both set explicitly. `script_location` is relative in alembic.ini, so it resolves
+    # against the working directory — which is whatever the caller happened to be in.
+    config.set_main_option("script_location", str(BACKEND_ROOT / "alembic"))
+    config.set_main_option("sqlalchemy.url", f"sqlite+pysqlite:///{db_path}")
+    command.upgrade(config, "head")
+
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="app.seed", description=__doc__)
@@ -49,6 +77,9 @@ def main(argv: list[str] | None = None) -> int:
         from app.config import get_settings
 
         db_path = get_settings().db_path
+
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    ensure_schema(db_path)
 
     db = Database(db_path)
     try:
