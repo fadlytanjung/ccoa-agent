@@ -31,9 +31,13 @@ permissions:
   contents: read
   id-token: write # required to mint the OIDC token that assumes the AWS role
 
+# `ENVIRONMENT` is deliberately **not** here. Setting it workflow-wide leaked `dev` into
+# the check job, where `Settings` then refused to start without a Gemini API key — the
+# backend enforces that outside `local` on purpose (docs/14 §3.7), so the guard was right
+# and the workflow was wrong. It belongs to the deploy job, which is the only place it
+# means anything.
 env:
   AWS_REGION: ap-southeast-1
-  ENVIRONMENT: dev
   NODE_VERSION: "22"
   PYTHON_VERSION: "3.12"
 
@@ -85,6 +89,8 @@ jobs:
     runs-on: ubuntu-latest
     needs: [check]
     environment: dev
+    env:
+      ENVIRONMENT: dev
     outputs:
       app_url: ${{ steps.outputs.outputs.app_url }}
     steps:
