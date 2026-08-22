@@ -127,7 +127,7 @@ here would fail when it breaks.
 
 | Layer | Where | Count | Question it answers | Cost |
 |---|---|---|---|---|
-| Backend unit + graph | `backend/tests/` | **201 passing, 88% coverage** | Is the code wired correctly? | ~3 s, no network |
+| Backend unit + graph | `backend/tests/` | **205 passing, 88% coverage** | Is the code wired correctly? | ~3 s, no network |
 | Frontend unit | `frontend/src/**/*.test.ts(x)` | **68 passing** | Do the parser, reducer, auth URLs, and approval card behave? | ~1 s |
 | Browser end-to-end | `frontend/e2e/assistant.spec.ts` | **10 passing** (4 shell + 4 `@live`) | Does a real browser, against a real backend, reach a person? | ~16 s |
 | Phone end-to-end | `frontend/e2e/mobile.spec.ts` | **5 passing** | Does the layout transform rather than compress? | ~2 s |
