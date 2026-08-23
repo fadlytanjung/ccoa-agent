@@ -33,7 +33,7 @@ edge = "alb"
 # ownership, waits for validation, and points the domain at the load balancer. Until then
 # the self-signed certificate keeps sign-in working, because Cognito rejects http://
 # callbacks and an unencrypted edge cannot authenticate anyone at all.
-domain_name             = ""
+domain_name             = "ccoa-agent.site"
 acm_certificate_arn     = ""
 self_signed_certificate = true
 
