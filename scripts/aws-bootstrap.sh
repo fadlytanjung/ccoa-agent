@@ -151,6 +151,51 @@ else
   pass "boundary created"
 fi
 
+# GitHub changed the OIDC subject claim on 2026-07-15. Repositories created on or after
+# that date — and older ones that opted in — embed the permanent numeric ids of the owner
+# and the repository:
+#
+#   legacy     repo:owner/name:ref:refs/heads/main
+#   immutable  repo:owner@26320892/name@1342916764:ref:refs/heads/main
+#
+# A trust policy written for the legacy shape fails against the new one with
+# "Not authorized to perform sts:AssumeRoleWithWebIdentity" — an error that names the
+# action and not the mismatch, and looks exactly like a missing permission.
+#
+# The ids are what make the claim immutable: a recycled organisation or repository name
+# cannot mint a token that matches a stale policy. So the immutable form is used whenever
+# the ids can be read, and the legacy form only as a fallback.
+OWNER="${GITHUB_REPO%%/*}"
+REPO_NAME="${GITHUB_REPO##*/}"
+SUBJECT="repo:${GITHUB_REPO}:*"
+
+# Read over plain HTTPS rather than through `gh`: the ids are public for a public
+# repository, so this needs no authentication — and `gh` inherits whatever GITHUB_TOKEN
+# happens to be in the environment, which silently fails when that token is stale. That
+# failure is invisible here: the script would fall back to the legacy form and produce a
+# trust policy that looks right and does not work.
+REPO_JSON="$(curl -fsSL "https://api.github.com/repos/${GITHUB_REPO}" 2>/dev/null || true)"
+if [[ -n "$REPO_JSON" ]]; then
+  read -r OWNER_ID REPO_ID <<<"$(printf '%s' "$REPO_JSON" | python3 -c "
+import json, sys
+try:
+    d = json.load(sys.stdin)
+    print(d['owner']['id'], d['id'])
+except Exception:
+    print('', '')
+")"
+  if [[ -n "${OWNER_ID:-}" && -n "${REPO_ID:-}" ]]; then
+    SUBJECT="repo:${OWNER}@${OWNER_ID}/${REPO_NAME}@${REPO_ID}:*"
+  fi
+fi
+
+if [[ "$SUBJECT" == *"@"* ]]; then
+  info "subject claim: immutable form (owner and repository ids embedded)"
+else
+  warn "subject claim: legacy form — the repository ids could not be read."
+  warn "If the deploy fails with sts:AssumeRoleWithWebIdentity, this is why (2026-07-15 change)."
+fi
+
 TRUST_POLICY="$(jq -n --arg arn "$OIDC_ARN" --arg host "$OIDC_HOST" --arg sub "$SUBJECT" '{
   Version: "2012-10-17",
   Statement: [{
@@ -193,7 +238,7 @@ aws iam put-role-policy --role-name "$ROLE_NAME" --policy-name ccoa-deploy-inlin
       { "Effect": "Allow", "Action": [
           "ec2:*", "ecs:*", "ecr:*", "elasticloadbalancing:*", "cloudfront:*",
           "logs:*", "secretsmanager:*", "cognito-idp:*", "wafv2:*",
-          "application-autoscaling:*", "acm:*", "cloudwatch:*", "route53:*", "route53:*",
+          "application-autoscaling:*", "acm:*", "cloudwatch:*", "route53:*",
           "iam:PassRole", "iam:GetRole", "iam:CreateRole",
           "iam:DeleteRole", "iam:AttachRolePolicy", "iam:DetachRolePolicy",
           "iam:PutRolePolicy", "iam:DeleteRolePolicy", "iam:TagRole",
@@ -216,9 +261,8 @@ echo
 printf '    gh secret set AWS_DEPLOY_ROLE_ARN --repo %s --body "%s"\n' "$GITHUB_REPO" "$ROLE_ARN"
 printf '    gh variable set AWS_REGION --repo %s --body "%s"\n' "$GITHUB_REPO" "$REGION"
 echo
-note "backend config for terraform/, once it exists:"
+note "backend config for terraform/:"
 note "  bucket = \"ccoa-tfstate-<AWS_ACCOUNT_ID>\"   key = \"dev/terraform.tfstate\""
 note "  region = \"$REGION\"                          use_lockfile = true"
 echo
-warn "Terraform itself is not implemented yet — docs/20 §4.4. This script sets up"
-warn "everything it will need; there is nothing to apply until then."
+note "Then deploy with ./scripts/deploy.sh, or by merging to main."
