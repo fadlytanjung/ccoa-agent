@@ -107,7 +107,7 @@ if it broke is **Partial** at best.
 | `scripts/deploy.sh`, `destroy.sh` | **Partial** | Written and exercised step by step by hand; **not yet run end to end**, because the CloudFront step cannot complete |
 | Cognito provisioning script | **Built** | `scripts/aws-cognito.sh`. **Executed against the real account** — pool, groups, domain, and public client exist in `ap-southeast-1`, self-registration disabled ([ops-log](ops-log.md), [ADR-008](adr/ADR-008-provisioned-identity.md)) |
 | Deployed environment | **Built** | `dev` is live on an internet-facing ALB. **A full sign-in completes and the agent answers through the deployed stack** — verified with a real Cognito user against the running environment, with no console errors |
-| Viewer TLS | **Partial** | A **self-signed** certificate, so every visitor sees a browser warning. Cognito rejects `http://` callbacks, so this was the only way to have working sign-in without a domain. A real certificate is one variable and ~15 minutes ([09](09-networking.md) §6.6) |
+| Viewer TLS | **Partial** | A **self-signed** certificate, so every visitor sees a browser warning. Cognito rejects `http://` callbacks, so this was the only way to have working sign-in without a domain. The managed path is **built and unused**: set `domain_name` and Terraform requests an ACM certificate, validates it by DNS, and points the domain at the load balancer ([22](22-getting-started.md) §5.1a) |
 
 **The headline:** `dev` is **deployed and reachable**, on `develop`. The CloudFront edge
 the design argues for is blocked by AWS account verification, so the same Terraform runs

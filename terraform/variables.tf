@@ -68,6 +68,26 @@ variable "acm_certificate_arn" {
   default     = ""
 }
 
+variable "domain_name" {
+  description = <<-EOT
+    A domain you control, such as `ccoa.example.com`. Set it and TLS stops warning.
+
+    This is the only way to a certificate a browser trusts. A load balancer's own
+    `*.elb.amazonaws.com` name cannot have one: certificate authorities issue for domains
+    the requester can prove they control, and that is Amazon's domain, not yours.
+
+    With this set, Terraform requests an ACM certificate, proves ownership by writing the
+    DNS record itself, waits for validation, attaches the certificate to the listener, and
+    points the domain at the load balancer. Nothing manual after the domain exists.
+
+    **The zone must already exist in Route 53.** Registering a domain there creates one
+    automatically; a domain registered elsewhere needs its nameservers pointed at the
+    zone first, which is the one step no API can do for you.
+  EOT
+  type        = string
+  default     = ""
+}
+
 variable "self_signed_certificate" {
   description = <<-EOT
     Generate a self-signed certificate for the ALB when no ACM ARN is supplied.

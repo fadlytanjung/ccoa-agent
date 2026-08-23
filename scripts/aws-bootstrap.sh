@@ -112,7 +112,7 @@ read -r -d '' BOUNDARY_DOC <<JSON || true
     { "Sid": "AllowServices", "Effect": "Allow", "Action": [
         "ec2:*", "ecs:*", "ecr:*", "elasticloadbalancing:*", "cloudfront:*",
         "logs:*", "s3:*", "secretsmanager:*", "cognito-idp:*", "wafv2:*",
-        "application-autoscaling:*", "acm:*", "cloudwatch:*",
+        "application-autoscaling:*", "acm:*", "cloudwatch:*", "route53:*",
         "iam:PassRole", "iam:GetRole", "iam:CreateRole",
         "iam:DeleteRole", "iam:AttachRolePolicy", "iam:DetachRolePolicy",
         "iam:PutRolePolicy", "iam:DeleteRolePolicy", "iam:TagRole", "iam:ListRolePolicies",
@@ -193,7 +193,7 @@ aws iam put-role-policy --role-name "$ROLE_NAME" --policy-name ccoa-deploy-inlin
       { "Effect": "Allow", "Action": [
           "ec2:*", "ecs:*", "ecr:*", "elasticloadbalancing:*", "cloudfront:*",
           "logs:*", "secretsmanager:*", "cognito-idp:*", "wafv2:*",
-          "application-autoscaling:*", "acm:*", "cloudwatch:*",
+          "application-autoscaling:*", "acm:*", "cloudwatch:*", "route53:*", "route53:*",
           "iam:PassRole", "iam:GetRole", "iam:CreateRole",
           "iam:DeleteRole", "iam:AttachRolePolicy", "iam:DetachRolePolicy",
           "iam:PutRolePolicy", "iam:DeleteRolePolicy", "iam:TagRole",

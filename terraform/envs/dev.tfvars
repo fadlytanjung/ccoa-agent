@@ -28,6 +28,12 @@ edge = "alb"
 # cannot sign anyone in at all. With no domain to get a real certificate for, this makes
 # the environment usable at the cost of a browser warning on first visit. It expires in
 # 30 days, so it cannot quietly become permanent.
+# Set `domain_name` to a domain whose Route 53 zone you own and the browser warning goes
+# away entirely: Terraform requests an ACM certificate, writes the DNS record that proves
+# ownership, waits for validation, and points the domain at the load balancer. Until then
+# the self-signed certificate keeps sign-in working, because Cognito rejects http://
+# callbacks and an unencrypted edge cannot authenticate anyone at all.
+domain_name             = ""
 acm_certificate_arn     = ""
 self_signed_certificate = true
 

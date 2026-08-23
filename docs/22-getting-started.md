@@ -233,6 +233,37 @@ gh variable set AWS_REGION --repo <ORG>/<REPO> --body "ap-southeast-1"
 The role ARN contains the account id, so it is a **secret**, not a variable — this
 repository is public ([18](18-aws-access-and-manual-steps.md) §6).
 
+### 5.1a "Not secure" in the browser
+
+The deployed environment currently serves a **self-signed** certificate, so every visitor
+is asked to override a warning. The traffic is encrypted; what is missing is any attestation
+of *who* is on the other end.
+
+**There is no way to fix this without a domain.** A load balancer's own
+`*.elb.amazonaws.com` name cannot have a trusted certificate: a certificate authority
+issues for domains the requester can prove they control, and that one is Amazon's.
+
+Why a self-signed certificate at all, rather than plain HTTP: **Cognito rejects `http://`
+callback URLs** for anything but `localhost`. An unencrypted edge cannot sign anyone in, so
+the choice was never HTTPS-or-HTTP — it was HTTPS or no authentication.
+
+To fix it properly:
+
+1. **Register a domain.** Route 53 → *Registered domains* → *Register*. A `.click` or
+   `.link` is a few dollars a year, and registering there creates the hosted zone for you.
+   A domain from elsewhere works too — point its nameservers at a Route 53 zone first.
+2. **Set one variable** in `terraform/envs/dev.tfvars`:
+   ```hcl
+   domain_name = "ccoa.example.com"
+   ```
+3. **Deploy.** Terraform requests an ACM certificate, writes the DNS record that proves
+   ownership, waits for validation, attaches the certificate to the listener, and points
+   the domain at the load balancer. The self-signed certificate is dropped automatically —
+   `self_signed_certificate` is ignored once a domain is set.
+
+Cognito's callback URLs follow the same variable, so sign-in keeps working at the new
+address with no further change.
+
 ### 5.2a If CloudFront is refused on a new account
 
 The first deploy of this project hit it, so expect it:
