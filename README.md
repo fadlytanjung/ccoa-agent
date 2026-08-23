@@ -13,24 +13,16 @@ datastore is behind a seam, and the evaluation layer is the part most examples l
 [![CI](https://github.com/fadlytanjung/ccoa-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/fadlytanjung/ccoa-agent/actions/workflows/ci.yml)
 [![Deploy](https://github.com/fadlytanjung/ccoa-agent/actions/workflows/deploy.yml/badge.svg)](https://github.com/fadlytanjung/ccoa-agent/actions/workflows/deploy.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Support](https://img.shields.io/badge/Support-PayPal-00457C?logo=paypal&logoColor=white)](https://paypal.me/fdltanjung)
 
 [![Python](https://img.shields.io/badge/Python-3.12-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![LangGraph](https://img.shields.io/badge/LangGraph-1.2-1C3C3C?logo=langchain&logoColor=white)](https://langchain-ai.github.io/langgraph/)
 [![DeepEval](https://img.shields.io/badge/DeepEval-4.1-6E56CF)](https://deepeval.com)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.141-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
-[![Gemini](https://img.shields.io/badge/Gemini-3.5%20Flash-8E75B2?logo=googlegemini&logoColor=white)](https://ai.google.dev/)
 
 [![React](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black)](https://react.dev/)
-[![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
-[![Vite](https://img.shields.io/badge/Vite-7-646CFF?logo=vite&logoColor=white)](https://vite.dev/)
-[![Tailwind](https://img.shields.io/badge/Tailwind-4-06B6D4?logo=tailwindcss&logoColor=white)](https://tailwindcss.com/)
-
 [![Terraform](https://img.shields.io/badge/Terraform-1.11+-7B42BC?logo=terraform&logoColor=white)](https://developer.hashicorp.com/terraform)
 [![AWS ECS](https://img.shields.io/badge/AWS-ECS%20Fargate-FF9900?logo=amazonecs&logoColor=white)](https://aws.amazon.com/ecs/)
 [![Docker](https://img.shields.io/badge/Docker-ARM64-2496ED?logo=docker&logoColor=white)](https://www.docker.com/)
-[![Cognito](https://img.shields.io/badge/Auth-Cognito%20PKCE-DD344C?logo=amazoncognito&logoColor=white)](https://aws.amazon.com/cognito/)
-[![OIDC](https://img.shields.io/badge/CI%2FCD-OIDC%2C%20no%20keys-2088FF?logo=githubactions&logoColor=white)](https://docs.github.com/actions/deployment/security-hardening-your-deployments/about-security-hardening-with-openid-connect)
 
 </div>
 
@@ -259,7 +251,7 @@ not changed — which matters, because replacing the backend is a brief outage b
 
 ```
 backend/     FastAPI + LangGraph. Agents in app/agents/skills, evals in evals/
-frontend/    React 19 + Vite + TypeScript, token-based design system
+frontend/    React 19 + Vite + TypeScript, Tailwind v4 token-based design system
 terraform/   VPC, ECS, ALB, Cognito, WAF, S3 — one file per concern
 scripts/     preflight · dev · verify · deploy · destroy · AWS bootstrap
 docs/        23 specifications and 8 ADRs; start at docs/README.md
@@ -291,8 +283,13 @@ Two rules: **specs and code change together**, and **[`docs/20`](docs/20-impleme
 is updated by anything that adds, removes, or completes a component** — CI fails if it
 drifts.
 
-Issues and pull requests welcome. If this saved you time, a star helps, and
-[support](https://paypal.me/fdltanjung) is appreciated but never expected.
+Issues and pull requests welcome. If this saved you time, a star helps.
+
+<div align="center">
+
+[![Support](https://img.shields.io/badge/Support-PayPal-00457C?logo=paypal&logoColor=white)](https://paypal.me/fdltanjung)
+
+</div>
 
 ---
 
