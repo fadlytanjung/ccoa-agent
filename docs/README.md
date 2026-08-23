@@ -86,6 +86,10 @@ they are listed here because "the spec was updated" is easy to claim and hard to
 | [17](17-agent-skills.md) §3.9a | **Added `tools.yaml`** | Tool descriptions are prompt text and were the one category still living in Python |
 | [08](08-infrastructure.md) §3.6a, [ADR-007](adr/ADR-007-durable-sqlite-via-s3.md) | **Added a durability round-trip test** | The restore silently never ran; the guarantee had no observable symptom when it failed |
 | [11](11-cicd.md) §3.3a, §3.4a | Repository checks, and where evals sit | The public-repo rule needed enforcing, and evals needed a home that is not the merge gate |
+| [11](11-cicd.md) §3.2 | **Both pipelines are path-aware**, and deploy tags each image by the last commit that touched its service | Replacing the backend is a brief outage by design; not redeploying an unchanged service avoids an outage that buys nothing |
+| [03](03-architecture.md) §3.7 | **Added the scaling ceiling in one place** | The backend cap of one task is a correctness bound enforced by a Terraform validation, not a number to raise — the path past it is a datastore change |
+| [09](09-networking.md) §6.6 | **The edge is a variable**, CloudFront or an internet-facing ALB | AWS will not create a distribution on an unverified account, and the brief leaves service selection open. What is lost is defence in depth at B3, and the section says so |
+| [10](10-security.md) §3.1a | **`AllowAdminCreateUserOnly = true`** | Cognito's default lets anyone who finds the hosted UI create an account, and here every account can spend the model quota |
 | [06](06-backend-api.md) §3.2a | **Thread listing is cursor-paginated** | The sort key is `updated_at` and sending a message rewrites it, so an `OFFSET` page silently drops whatever row slid across the boundary |
 | [07](07-frontend.md) §3.10 | **A conversation is a route**, `/threads/:threadId` | Addressable, and it deletes a class of race rather than patching an instance of it |
 | [07](07-frontend.md) §3.6a | Free text answers a checkpoint **in the composer** | The card's own input duplicated it — and the composer was posting to a suspended graph |
