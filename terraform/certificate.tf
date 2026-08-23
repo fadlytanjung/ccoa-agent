@@ -99,6 +99,18 @@ resource "aws_acm_certificate_validation" "managed" {
 
   certificate_arn         = aws_acm_certificate.managed[0].arn
   validation_record_fqdns = [for record in aws_route53_record.validation : record.fqdn]
+
+  # ACM cannot see the validation record until the domain's registrar delegates to this
+  # hosted zone, and that is the one step no API here can perform. The default wait is 45
+  # minutes, which is a long time to sit at a prompt learning nothing: a delegation that
+  # has not happened will not happen in the next half hour either.
+  #
+  # Ten minutes is enough for genuine DNS propagation once delegation is in place, and
+  # short enough that the real cause — nameservers still pointing at the registrar — is
+  # obvious rather than mistaken for a slow apply.
+  timeouts {
+    create = "10m"
+  }
 }
 
 # The domain points at the load balancer. An alias record rather than a CNAME: it works at

@@ -247,19 +247,31 @@ Why a self-signed certificate at all, rather than plain HTTP: **Cognito rejects 
 callback URLs** for anything but `localhost`. An unencrypted edge cannot sign anyone in, so
 the choice was never HTTPS-or-HTTP — it was HTTPS or no authentication.
 
-To fix it properly:
+To fix it properly, once you own a domain:
 
-1. **Register a domain.** Route 53 → *Registered domains* → *Register*. A `.click` or
-   `.link` is a few dollars a year, and registering there creates the hosted zone for you.
-   A domain from elsewhere works too — point its nameservers at a Route 53 zone first.
-2. **Set one variable** in `terraform/envs/dev.tfvars`:
-   ```hcl
-   domain_name = "ccoa.example.com"
-   ```
-3. **Deploy.** Terraform requests an ACM certificate, writes the DNS record that proves
-   ownership, waits for validation, attaches the certificate to the listener, and points
-   the domain at the load balancer. The self-signed certificate is dropped automatically —
-   `self_signed_certificate` is ignored once a domain is set.
+```bash
+./scripts/enable-domain.sh app.example.com
+```
+
+It creates the Route 53 hosted zone if there is not one, prints the four nameservers to
+set at your registrar, and — once delegation is live — writes `domain_name` into the
+environment's tfvars. Push, and Terraform requests the certificate, writes the DNS record
+that proves ownership, waits for validation, attaches it to the listener, and points the
+domain at the load balancer. The self-signed certificate is dropped automatically.
+
+Re-run the script as often as you like; it is idempotent and tells you which of the three
+conditions is not yet met.
+
+**The one step no API can perform** is changing the nameservers at your registrar. Until
+that propagates, ACM cannot see the validation record — so the script refuses to set the
+variable, and the certificate resource carries a ten-minute timeout rather than the
+default forty-five, because a delegation that has not happened will not happen in the next
+half hour either.
+
+**The hosted zone is deliberately not managed by Terraform.** A zone recreated by
+`terraform destroy` gets new nameservers, and you would be editing the registrar again
+after every teardown. Like the state bucket, it outlives the environment; Terraform reads
+it with a `data` source and owns only the records inside it.
 
 Cognito's callback URLs follow the same variable, so sign-in keeps working at the new
 address with no further change.
