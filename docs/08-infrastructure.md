@@ -221,8 +221,24 @@ Load-bearing details, not boilerplate:
 
 | Service | min | max | Policy |
 |---|---|---|---|
-| `frontend` | **0** | 2 | Target tracking on ALB request count |
-| `backend` | **0** | **1** | Scale 0↔1 on ALB request count |
+| `frontend` | `var.min_capacity` — **1 in `dev`** | 2 | Target tracking on ALB request count |
+| `backend` | `var.min_capacity` — **1 in `dev`** | **1** | Target tracking, plus a step policy to wake from 0 |
+
+**Amended 2026-08-23.** `min_capacity` is a variable and `dev` runs warm at 1. Two things
+made that the right default rather than the thrifty one:
+
+* **The first request after idle gets a 503**, not a slow response. A reviewer opening the
+  URL sees an error page, waits 45–75 s with no indication anything is happening, and
+  reloads. "Costs nothing while idle" is worth about $0.02/hour here, and that is a poor
+  trade against the only impression anybody forms of the system.
+* **The wake policy did not work.** It watched `RequestCount` dimensioned by *TargetGroup*,
+  which counts requests that reached a target — so with zero targets it reports nothing,
+  the alarm sits in `INSUFFICIENT_DATA`, and the service never scales back up. It was
+  watching a metric that cannot fire in the one state it exists to escape. Now dimensioned
+  by `LoadBalancer` alone, where a request is counted whether or not anything served it.
+
+Scale-to-zero remains available and is still what `min_capacity = 0` means; the mechanism
+is now correct, which it was not before.
 
 `backend` max is **1 as a correctness constraint**, not as tuning. Each task carries its
 own database copy, so two tasks would be two divergent datasets — a ticket created on

@@ -166,7 +166,15 @@ step "5/5  Smoke test"
 # more waiting.
 SMOKE_TIMEOUT=150
 
-code() { curl -s -o /dev/null -w '%{http_code}' --max-time 10 "$1"; }
+# `-k` only when Terraform reports a self-signed certificate. Unconditional would turn a
+# real TLS failure into a passing smoke test.
+INSECURE=""
+if [[ "$(tf output -json edge | jq -r .self_signed_certificate)" == "true" ]]; then
+  INSECURE="-k"
+  warn "verifying against a self-signed certificate — set acm_certificate_arn to remove this"
+fi
+
+code() { curl -s $INSECURE -o /dev/null -w '%{http_code}' --max-time 10 "$1"; }
 
 info "waiting for the first 200 (cold start is 45-75 s, cap ${SMOKE_TIMEOUT}s)"
 deadline=$(( SECONDS + SMOKE_TIMEOUT ))
@@ -195,8 +203,12 @@ check "public config is readable"  "200" "$(code "$APP_URL/api/v1/config")"
 
 # The highest-risk configuration in the whole design: a cached /api/* response would serve
 # one agent's answer to another. Asserted, not assumed (docs/08 §3.5, docs/09 §8).
-CACHE_HEADER="$(curl -s -D - -o /dev/null --max-time 30 "$APP_URL/api/v1/config" | grep -i '^x-cache' | tr -d '\r')"
-if grep -qi 'miss' <<<"$CACHE_HEADER"; then
+CACHE_HEADER="$(curl -s $INSECURE -D - -o /dev/null --max-time 30 "$APP_URL/api/v1/config" | grep -i '^x-cache' | tr -d '\r' || true)"
+if [[ -z "$CACHE_HEADER" ]]; then
+  # `X-Cache` is CloudFront's. On the ALB edge there is no cache layer, so the risk of
+  # serving one agent's response to another does not arise.
+  pass "no cache layer in front of /api/*"
+elif grep -qi 'miss' <<<"$CACHE_HEADER"; then
   pass "/api/* is not cached ($CACHE_HEADER)"
 else
   fail "/api/* may be cached: $CACHE_HEADER"

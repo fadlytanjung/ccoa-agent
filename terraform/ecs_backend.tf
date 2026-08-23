@@ -115,9 +115,10 @@ resource "aws_appautoscaling_target" "backend" {
   resource_id        = "service/${aws_ecs_cluster.main.name}/${aws_ecs_service.backend.name}"
   scalable_dimension = "ecs:service:DesiredCount"
 
-  # 0 costs nothing while idle, and is safe because replication is in place, not despite
-  # it: ECS scale-in is graceful and Litestream syncs before exiting (ADR-007 §1).
-  min_capacity = 0
+  # See `var.min_capacity`: 0 is the scale-to-zero design, and safe because replication is
+  # in place rather than despite it (ADR-007 §1). `dev` runs warm so that the first
+  # visitor does not meet a 503.
+  min_capacity = var.min_capacity
   # 1 is a correctness bound. See the variable's description.
   max_capacity = var.backend_max_capacity
 }
@@ -191,9 +192,14 @@ resource "aws_cloudwatch_metric_alarm" "backend_wake" {
   # Missing data is *not* breaching: an idle service should stay at zero.
   treat_missing_data = "notBreaching"
 
+  # **LoadBalancer only.** `RequestCount` broken down by TargetGroup counts requests that
+  # reached a target — so with zero targets it reports nothing, the alarm sits in
+  # INSUFFICIENT_DATA, and the service that was supposed to wake on traffic never sees
+  # any. The wake policy was watching a metric that cannot fire in the one state it
+  # exists to escape. At the load-balancer level the request is counted whether or not
+  # anything was there to serve it.
   dimensions = {
     LoadBalancer = aws_lb.main.arn_suffix
-    TargetGroup  = aws_lb_target_group.backend.arn_suffix
   }
 
   alarm_actions = [aws_appautoscaling_policy.backend_wake.arn]

@@ -103,7 +103,7 @@ resource "aws_appautoscaling_target" "frontend" {
   service_namespace  = "ecs"
   resource_id        = "service/${aws_ecs_cluster.main.name}/${aws_ecs_service.frontend.name}"
   scalable_dimension = "ecs:service:DesiredCount"
-  min_capacity       = 0
+  min_capacity       = var.min_capacity
   max_capacity       = var.frontend_max_capacity
 }
 
@@ -164,9 +164,14 @@ resource "aws_cloudwatch_metric_alarm" "frontend_wake" {
   statistic           = "Sum"
   treat_missing_data  = "notBreaching"
 
+  # **LoadBalancer only.** `RequestCount` broken down by TargetGroup counts requests that
+  # reached a target — so with zero targets it reports nothing, the alarm sits in
+  # INSUFFICIENT_DATA, and the service that was supposed to wake on traffic never sees
+  # any. The wake policy was watching a metric that cannot fire in the one state it
+  # exists to escape. At the load-balancer level the request is counted whether or not
+  # anything was there to serve it.
   dimensions = {
     LoadBalancer = aws_lb.main.arn_suffix
-    TargetGroup  = aws_lb_target_group.frontend.arn_suffix
   }
 
   alarm_actions = [aws_appautoscaling_policy.frontend_wake.arn]
