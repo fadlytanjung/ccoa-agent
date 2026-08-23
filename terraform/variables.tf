@@ -147,6 +147,25 @@ variable "frontend_image_tag" {
   }
 }
 
+variable "min_capacity" {
+  description = <<-EOT
+    Tasks to keep running when idle.
+
+    `0` is the scale-to-zero design (ADR-007 §1): compute costs nothing while nobody is
+    using it. It has a real cost of its own — **the first request after an idle period
+    gets a 503** while a task cold-starts, which takes 45-75 s on the backend.
+
+    That is fine for an environment only its authors use, and wrong for one anybody else
+    is going to open. `dev` therefore runs warm at `1`: about $0.02/hour, against a
+    reviewer's first impression being a blank error page.
+
+    The maximum is unaffected — the backend ceiling of 1 is a correctness bound and is a
+    separate variable.
+  EOT
+  type        = number
+  default     = 0
+}
+
 variable "backend_max_capacity" {
   description = <<-EOT
     Maximum backend tasks. **1 is a correctness bound, not tuning.**

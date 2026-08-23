@@ -38,5 +38,9 @@ self_signed_certificate = true
 # (docs/16 §4a). Both are availability and network-path trades, not capability ones —
 # every requirement is still met, and each variable's description says exactly what is
 # given up.
+# Warm rather than scaled-to-zero. This environment is opened by people who are not its
+# authors, and a 45-75 s cold start reads as "broken", not as "thrifty" (var.min_capacity).
+min_capacity = 1
+
 single_nat_gateway         = true
 enable_interface_endpoints = false

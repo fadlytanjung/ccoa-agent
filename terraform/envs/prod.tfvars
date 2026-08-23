@@ -20,5 +20,7 @@ log_retention_days = 30
 # Full fidelity, unlike dev: no cross-AZ egress dependency, and AWS-service traffic that
 # never leaves the VPC. This is the configuration docs/09 argues for, and the reason the
 # cheap settings live in tfvars rather than in the resources.
+min_capacity = 1
+
 single_nat_gateway         = false
 enable_interface_endpoints = true
