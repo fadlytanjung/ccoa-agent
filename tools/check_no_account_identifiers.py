@@ -22,6 +22,7 @@ Placeholders are the intended alternative and are explicitly allowed:
 from __future__ import annotations
 
 import argparse
+import subprocess
 import re
 import sys
 from pathlib import Path
@@ -130,9 +131,39 @@ def scan_file(path: Path, extra_terms: list[str]) -> list[str]:
     return findings
 
 
+def tracked_or_untracked(root: Path) -> list[Path] | None:
+    """Every file git would consider committing — tracked, plus untracked and not ignored.
+
+    This is the right population to scan, and it is narrower than "every file on disk".
+    A file git ignores cannot leak *through git*, and scanning it produces findings nobody
+    can act on: local tool state, a developer's scratch notes, a downloaded credentials
+    file that is ignored precisely because it must never be committed. Reporting those
+    trains people to skim past the output, which is how the one real finding gets missed.
+
+    Returns ``None`` outside a git working tree, so the caller can fall back to walking.
+    """
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(root), "ls-files", "--cached", "--others", "--exclude-standard"],
+            capture_output=True,
+            text=True,
+            timeout=60,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if result.returncode != 0:
+        return None
+    return [root / line for line in result.stdout.splitlines() if line]
+
+
 def iter_files(root: Path) -> list[Path]:
+    candidates = tracked_or_untracked(root)
+    if candidates is None:
+        candidates = [p for p in root.rglob("*")]
+
     files: list[Path] = []
-    for path in root.rglob("*"):
+    for path in candidates:
         if not path.is_file():
             continue
         if any(part in SKIP_DIRECTORIES for part in path.parts):

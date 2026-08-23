@@ -55,12 +55,68 @@ natural expiry and no per-ref scoping. OIDC tokens are minted per run and expire
 
 ### 3.2 Workflow structure
 
-Two workflows, because pull requests and merges want different things:
+Two workflows, because they answer different questions at different moments:
 
-| Workflow | Trigger | Does |
-|---|---|---|
-| `ci.yml` | PR to `main`, push to any branch | Validate → test → build (no push) → `terraform plan` |
-| `deploy.yml` | Push to `main`, manual dispatch | Validate → test → build **and push** → deploy `dev` → gated `prod` |
+| Workflow | Trigger | Asks | Credentials |
+|---|---|---|---|
+| `ci.yml` | PR to `main` or `develop`; push to any branch but `main` | *Is this change sound?* | **None** — safe on a fork |
+| `deploy.yml` | Push to `main`, manual dispatch | *Should this become the running system?* | Assumes an AWS role by OIDC |
+
+Merging them would mean one of two bad things: granting deploy credentials to
+pull-request runs — which is how a fork gets to assume your role — or carrying a large
+`if:` on every step of a single workflow until neither path is legible.
+
+#### Nothing runs that the change cannot affect
+
+*(Added 2026-08-23.)* Both workflows begin with a `changes` job that diffs against the
+merge base, and every other job keys off it.
+
+```mermaid
+graph LR
+    C["changes"] --> B["backend"]
+    C --> F["frontend"]
+    C --> T["terraform"]
+    C --> R["repository"]
+    B & F --> BR["browser"]
+    B & F --> CO["containers"]
+
+    classDef always fill:#e3fcef,stroke:#00684a,color:#001e2b
+    class R,C always
+```
+
+| Change | Runs |
+|---|---|
+| `backend/**` | backend, browser, containers, repository |
+| `frontend/**` | frontend, browser, containers, repository |
+| `terraform/**` | terraform, repository |
+| `docs/**` only | **repository only** |
+
+The repository checks have no filter, deliberately: an account id or a secret is most
+often leaked in a *document*, so a docs-only change is exactly when they matter.
+
+The workflow file counts as a change to everything it runs. Editing a job must exercise
+that job, or the edit stays untested until something unrelated happens to touch the same
+area.
+
+#### Only the changed service is rebuilt and redeployed
+
+`deploy.yml` tags each image with **the last commit that touched that service**, not the
+head commit:
+
+```bash
+backend_tag="$(git log -1 --format=%H -- backend)"
+frontend_tag="$(git log -1 --format=%H -- frontend)"
+```
+
+A frontend-only change therefore leaves the backend's tag exactly as it was. Terraform is
+declarative, so an unchanged tag produces no diff and ECS does not replace a task that has
+not changed. The build is skipped too — the tag is already in ECR, and the repositories
+are `IMMUTABLE`, so pushing it again would fail rather than overwrite.
+
+That matters more than build minutes. Replacing the backend is **a brief outage by
+design**: two backend tasks would be two divergent databases, so the deployment strategy
+stops the old task before starting the new one ([04](04-data-model.md) §3.5). Not
+redeploying a service that has not changed avoids an outage that buys nothing.
 
 Jobs run per service where they can. `backend` and `frontend` validate, test, and build
 **in parallel and independently** — a frontend lint failure does not block a backend

@@ -208,6 +208,74 @@ partial evidence already gathered. Detail in [05](05-langgraph-orchestration.md)
 
 ---
 
+### 3.7 Scaling, and where it stops
+
+*(Added 2026-08-23.)* The two services scale differently, and the difference is not
+tuning — it is a property of the datastore.
+
+```mermaid
+graph TB
+    subgraph FE["frontend — horizontal"]
+        F1["task"]:::ok
+        F2["task"]:::ok
+        F3["…up to max"]:::ok
+    end
+
+    subgraph BE["backend — vertical only"]
+        B1["task"]:::cap
+        B2["a second task"]:::no
+    end
+
+    DB[("SQLite in-image")]
+    S3[("S3 replica")]
+
+    F1 & F2 & F3 -->|"stateless"| Anything["any request"]
+    B1 --> DB -->|"Litestream"| S3
+    B2 -.->|"would be a second<br/>database, and a second<br/>writer"| DB
+
+    classDef ok fill:#e3fcef,stroke:#00684a,color:#001e2b
+    classDef cap fill:#fff8e0,stroke:#d79a2b,color:#714900
+    classDef no fill:#f4ded9,stroke:#c95746,color:#7d3025,stroke-dasharray: 4 3
+```
+
+| Service | Scales | Ceiling | Why |
+|---|---|---|---|
+| `frontend` | Horizontally | `var.frontend_max_capacity` (2) | Stateless: serves static files and calls nothing. Ordinary tuning |
+| `backend` | **Vertically only** | **`1`, enforced by a variable validation** | Each task carries its own SQLite file. Two tasks are two divergent datasets — a ticket created on one is invisible to the other ([04](04-data-model.md) §3.5) — and two Litestream writers corrupt the replica ([ADR-007](adr/ADR-007-durable-sqlite-via-s3.md)) |
+
+The backend ceiling is expressed in code rather than left to convention, so raising it is a
+deliberate act that fails loudly:
+
+```hcl
+validation {
+  condition     = var.backend_max_capacity == 1
+  error_message = "The backend must stay at exactly 1 task. See ADR-007 and docs/04 §3.5."
+}
+```
+
+**More traffic therefore means a bigger task, not more tasks.** At this corpus size — ~2,000
+rows, a handful of concurrent agents — that is genuinely sufficient, and the honest reason
+for the design is that it removes a managed database from a system that does not need one
+([ADR-005](adr/ADR-005-runtime-and-persistence.md)).
+
+**What would have to change to scale out.** Not the variable — the datastore. The options
+are costed in [15](15-datastore-options.md); the shape of the work is:
+
+| Step | Consequence |
+|---|---|
+| Move the corpus to a networked store (Aurora Serverless, Neon, RDS) | Removes the single-writer constraint and Litestream with it |
+| Replace `langgraph-checkpoint-sqlite` | The Postgres checkpointer is a first-party package, so this is a swap, not a rewrite — `build_graph(checkpointer=None)` already exists for exactly this reason ([00](00-constitution.md) §3) |
+| Move vectors out of `sqlite-vec` | A semantic hit currently joins to its interaction in one query ([13](13-vector-search.md) §3.1); across two stores it becomes two |
+| Raise `backend_max_capacity` | The last step, not the first |
+
+The constitution's rule that the graph never hard-wires a checkpointer is what keeps that
+path open: the Agent Server, FastAPI, and the tests each supply their own today, and a
+Postgres saver would be a fourth.
+
+**What does not need to change.** The frontend, the API contract, the skills, the
+authorisation model, and every test above the repository layer. The seam is deliberately
+one layer wide.
+
 ## 4. Decisions and tradeoffs
 
 | Decision | Alternatives considered | Rationale |

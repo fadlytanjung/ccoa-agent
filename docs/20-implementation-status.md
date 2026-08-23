@@ -98,8 +98,8 @@ if it broke is **Partial** at best.
 |---|---|---|
 | **Terraform** — VPC, ECS, ALB, Cognito, S3, ECR, WAF | **Built** | 21 files, `validate` clean, **fully applied**. `dev` is live and reachable |
 | CloudFront edge (`edge = "cloudfront"`) | **Blocked** | Written and planned clean; AWS will not create a distribution on an unverified account ([ops-log](ops-log.md)). `develop` runs `edge = "alb"` instead ([09](09-networking.md) §6.6) |
-| **CD — `deploy.yml`** | **Built** | Checks → build and push ARM64 images → apply → bounded smoke test. Repository secrets set. **Never executed** — the repository has no commits yet |
-| **CI — validate, test, browser, containers** | **Built** | `.github/workflows/ci.yml`. Runs the same checks as `scripts/verify.sh`. **Never executed on GitHub** — the repository was connected after it was written |
+| **CD — `deploy.yml`** | **Built** | Runs on `main`. Tags each image by the last commit that touched that service, so only the changed service is rebuilt and redeployed. **Green end to end** against the live environment |
+| **CI — validate, test, browser, containers** | **Built** | `.github/workflows/ci.yml`. Path-aware: a change runs only the jobs it can affect. Green on GitHub |
 
 | Local scripts — preflight, dev, verify | **Built** | `scripts/`. All three run clean on a developer machine |
 | Repository safety check | **Built** | `tools/check_no_account_identifiers.py` — runs, and passes |
@@ -173,9 +173,11 @@ Ordered by how much they would matter if this were going further.
    not are all downstream of the CloudFront distribution AWS is refusing until the account
    is verified. Nothing in this repository can fix that; the case is open in
    [ops-log](ops-log.md). Once cleared, one `./scripts/deploy.sh` finishes it.
-2. **Neither workflow has ever run.** The repository has **no commits** — `ci.yml` and
-   `deploy.yml` are code that has never been executed by GitHub. Expect the first push to
-   find something; that is what first pushes do.
+2. ~~**Neither workflow has ever run.**~~ **Closed 2026-08-23** — both are green. The
+   first runs found five real defects: a stale action pin, workflow-level `ENVIRONMENT`
+   leaking into the check job, a seed that could not run on a fresh checkout, `alembic
+   check` failing on sqlite-vec virtual tables, and a durability script parsing a response
+   shape that had changed under it.
 3. ~~**No token from the real pool has reached the API yet.**~~ **Closed 2026-08-23** —
    a full sign-in now completes against the deployed environment. What follows is kept
    only as the record: the SPA redirects to the real hosted UI and the login form renders,

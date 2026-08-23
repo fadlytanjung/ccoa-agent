@@ -40,6 +40,18 @@ frontend/dist/
 .vite/
 *.tsbuildinfo
 
+# ---- local tool state ----
+# Claude Code writes per-machine permission entries here, which name local accounts and
+# paths. It is covered by many people's global gitignore; relying on that means the first
+# contributor without one commits their machine's configuration into a public repository.
+.claude/settings.local.json
+
+# ---- drafts, not deliverables ----
+# Promotional copy and other personal drafts. Kept locally so they can be edited in the
+# repository without becoming part of it.
+linkedin-post.md
+drafts/
+
 # ---- test artefacts ----
 # Playwright writes traces, videos, and failure screenshots per run; they are large,
 # binary, and meaningless outside the run that produced them.

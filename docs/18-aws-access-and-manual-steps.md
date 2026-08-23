@@ -462,6 +462,10 @@ fails the build on any of the above:
 
 ```bash
 python3 tools/check_no_account_identifiers.py
+# The scan covers what git would consider committing — tracked files, plus untracked ones
+# git does not ignore. A file git ignores cannot leak through git, and reporting it
+# produces findings nobody can act on, which trains people to skim past the output.
+#
 # Optionally forbid extra terms, passed on the command line so the term itself
 # is never committed:
 python3 tools/check_no_account_identifiers.py --term "acme-corp"

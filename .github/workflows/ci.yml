@@ -1,34 +1,33 @@
-# Validate → test → build — docs/11 §3.2.
+# Validate and test — docs/11 §3.2.
 #
-# Backend and frontend run as independent jobs on purpose: a frontend lint failure must
-# not block a backend change, which is what REQ-006 ("deployed independently") means in
-# pipeline terms.
+# **Why this is separate from deploy.yml.** They answer different questions and run at
+# different moments. This one runs on every branch and every pull request and asks "is this
+# change sound?"; it needs no credentials and can safely run on a fork. `deploy.yml` runs
+# only on `main`, assumes an AWS role, and asks "should this become the running system?".
+# Merging them would mean either granting deploy credentials to pull-request runs — which
+# is how a fork gets to assume your role — or carrying a large `if:` on every step.
 #
-# Actions are pinned to a major tag, checked against the registry rather than copied from
-# a tutorial — every version in the first draft of this file was several majors stale, and
-# a stale pin fails on the first run with an error about the runner, not about the pin.
+# **Nothing runs that the change cannot affect.** A frontend-only change runs frontend
+# jobs; a docs-only change runs the repository checks and stops. The `changes` job below
+# computes that once and every other job keys off it.
 #
-# Check the **git ref**, not the release name: `astral-sh/setup-uv` publishes releases up
-# to v10 but its newest floating major tag is v7, so `@v10` fails to resolve even though
-# a release by that number exists. `git/ref/tags/<tag>` returning 200 is the only thing
-# that means a pin will work.
-# A hardened setup would pin each to a full commit SHA; major tags are the deliberate
-# trade here, in exchange for security patches arriving without a PR.
+# Agent evaluations are deliberately absent. They call a real model, cost money per run,
+# and a failure needs a person to decide whether the agent regressed or the expectation
+# was wrong — a judgement that gets skipped when it blocks a merge (docs/19 §3.1).
 #
-# Agent evaluations are deliberately NOT here. They call a real model, cost money, and a
-# failure needs a person to judge whether the agent got worse or the expectation was wrong
-# — putting that in the merge path teaches everyone to ignore it (docs/19 §3.1).
+# Actions are pinned to a major tag verified against `git/ref/tags`, not against a release
+# name: `astral-sh/setup-uv` publishes releases up to v10 while its newest floating major
+# tag is v7, so `@v10` fails to resolve. A stale pin fails on the first run with an error
+# about the runner rather than about the pin.
 name: CI
 
 on:
   pull_request:
-    branches: [main]
+    branches: [main, develop]
   push:
     branches-ignore: [main]
   workflow_dispatch:
 
-# One run per branch. A force-push should cancel the run it superseded rather than pay for
-# both and report the older one second.
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
@@ -41,13 +40,13 @@ env:
   NODE_VERSION: "22"
 
 jobs:
-  # Which parts of the tree this change actually touches. Used to keep the slow container
-  # job off pull requests that cannot possibly break it — a docs change should not spend
-  # four minutes pulling MinIO and building two images.
   changes:
-    name: Changed paths
+    name: What changed
     runs-on: ubuntu-latest
     outputs:
+      backend: ${{ steps.filter.outputs.backend }}
+      frontend: ${{ steps.filter.outputs.frontend }}
+      terraform: ${{ steps.filter.outputs.terraform }}
       images: ${{ steps.filter.outputs.images }}
     steps:
       - uses: actions/checkout@v7
@@ -57,31 +56,52 @@ jobs:
       - id: filter
         run: |
           base="${{ github.event.pull_request.base.sha || github.event.before }}"
-          # A first push, or a force-push past the recorded base, leaves nothing to
-          # compare against. Run everything rather than guess.
+
+          # A first push, or a force-push past the recorded base, leaves nothing to diff
+          # against. Run everything rather than guess — the failure mode of guessing wrong
+          # is a change that reached main untested.
           if [ -z "$base" ] || [ "$base" = "0000000000000000000000000000000000000000" ] \
              || ! git cat-file -e "$base" 2>/dev/null; then
-            echo "images=true" >> "$GITHUB_OUTPUT"
+            echo "no usable base commit — running everything"
+            for k in backend frontend terraform images; do echo "$k=true" >> "$GITHUB_OUTPUT"; done
             exit 0
           fi
-          if git diff --name-only "$base" HEAD \
-             | grep -qE '^(backend/(app|docker|Dockerfile|pyproject|uv.lock)|frontend/(src|nginx|Dockerfile|package)|\.github/workflows/ci\.yml)'; then
-            echo "images=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "images=false" >> "$GITHUB_OUTPUT"
-          fi
+
+          files="$(git diff --name-only "$base" HEAD)"
+          echo "changed files:"; echo "$files" | sed 's/^/  /'
+
+          match() { echo "$files" | grep -qE "$1"; }
+
+          # The workflow itself counts as a change to everything it runs: editing a job
+          # must exercise that job, or the edit is untested until something else happens
+          # to touch the same area.
+          workflow='^\.github/workflows/ci\.yml$'
+
+          match "^backend/|$workflow"                  && b=true || b=false
+          match "^frontend/|$workflow"                 && f=true || f=false
+          match "^terraform/|$workflow"                && t=true || t=false
+          # Anything that can change what ends up inside an image.
+          match "^(backend|frontend)/|$workflow"       && i=true || i=false
+
+          {
+            echo "backend=$b"
+            echo "frontend=$f"
+            echo "terraform=$t"
+            echo "images=$i"
+          } >> "$GITHUB_OUTPUT"
 
   backend:
     name: Backend
     runs-on: ubuntu-latest
+    needs: [changes]
+    if: needs.changes.outputs.backend == 'true'
     defaults:
       run:
         working-directory: backend
     steps:
       - uses: actions/checkout@v7
 
-      - name: Install uv
-        uses: astral-sh/setup-uv@v7
+      - uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
           cache-dependency-glob: backend/uv.lock
@@ -99,16 +119,17 @@ jobs:
         run: uv run mypy app
 
       - name: Seed the corpus
-        # The suite reads real records, and the generator is deterministic — so this
-        # produces the same corpus the tests were written against (docs/12 §3.2).
+        # Deterministic, so this is the same corpus the tests were written against
+        # (docs/12 §3.2). The command migrates first — it did not always, and every
+        # caller but the Dockerfile broke on a fresh checkout.
         run: uv run python -m app.seed --reset
 
       - name: Tests
         run: uv run pytest -q
 
       - name: No inline prompts
-        # Prompts belong in SKILL.md, and they drift back into Python one "just this
-        # once" at a time (docs/17 §3.9).
+        # Prompts belong in SKILL.md and drift back into Python one "just this once" at a
+        # time (docs/17 §3.9).
         run: uv run python tools/check_no_inline_prompts.py
 
       - name: Migrations match the models
@@ -117,6 +138,8 @@ jobs:
   frontend:
     name: Frontend
     runs-on: ubuntu-latest
+    needs: [changes]
+    if: needs.changes.outputs.frontend == 'true'
     defaults:
       run:
         working-directory: frontend
@@ -130,24 +153,26 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
 
       - run: npm ci
-
       - name: Types
         run: npx tsc -b --noEmit
-
       - name: Lint
         run: npm run lint
-
       - name: Unit tests
         run: npx vitest run
-
       - name: Build
         run: npm run build
 
   browser:
     name: Browser
     runs-on: ubuntu-latest
-    # Needs both halves working before it is worth starting a browser.
-    needs: [backend, frontend]
+    needs: [changes, backend, frontend]
+    # `always()` because `needs` on a skipped job would otherwise skip this too, and a
+    # frontend-only change still wants the browser tier — it drives a real backend.
+    if: |
+      always()
+      && needs.changes.outputs.images == 'true'
+      && needs.backend.result != 'failure'
+      && needs.frontend.result != 'failure'
     steps:
       - uses: actions/checkout@v7
 
@@ -177,9 +202,9 @@ jobs:
 
       - name: Browser and phone tests
         working-directory: frontend
-        # No GEMINI_API_KEY, so the `@live` specs skip and the shell tier still runs. A
-        # fork's pull request cannot read secrets anyway, and a suite that fails for
-        # contributors is a suite people learn to ignore (docs/19 §3.1).
+        # No GEMINI_API_KEY, so the `@live` specs skip and the token-free tier still runs.
+        # A fork's pull request cannot read secrets anyway, and a suite that fails for
+        # contributors is a suite people learn to ignore.
         run: npx playwright test
 
       - name: Upload the report on failure
@@ -190,66 +215,61 @@ jobs:
           path: frontend/playwright-report/
           retention-days: 7
 
-  # Builds both images and checks what they actually do at runtime.
-  #
-  # Kept, despite being the slowest job here, because both scripts test properties that
-  # are **silent** when broken: a container that never restores its database still boots,
-  # still passes every health check, and serves the corpus baked in at build time
-  # (ADR-007); and an `add_header` inside an nginx `location` discards every inherited
-  # one, so a CSP declared at server level can reach no response at all while the config
-  # tests clean (docs/07 §3.9). Neither shows up in a unit test, and both have actually
-  # happened in this repository.
-  #
-  # Skipped when nothing that could affect an image changed.
   containers:
     name: Containers
     runs-on: ubuntu-latest
     needs: [changes, backend, frontend]
-    if: needs.changes.outputs.images == 'true' 
+    if: |
+      always()
+      && needs.changes.outputs.images == 'true'
+      && needs.backend.result != 'failure'
+      && needs.frontend.result != 'failure'
     steps:
       - uses: actions/checkout@v7
-
       - uses: docker/setup-buildx-action@v4
 
+      # Both scripts test properties that are **silent** when broken: a container that
+      # never restores its database still boots, still passes every health check, and
+      # serves the corpus baked in at build time (ADR-007); and an `add_header` inside an
+      # nginx `location` discards every inherited one, so a CSP declared at server level
+      # can reach no response at all (docs/07 §3.9). Both have happened here.
       - name: Build the backend image
+        if: needs.changes.outputs.backend == 'true'
         uses: docker/build-push-action@v7
         with:
           context: backend
-          # Built for the architecture the tests run on. The ARM64 image the deployment
-          # actually uses is built in deploy.yml, where a matching runner is available.
           push: false
           load: true
           tags: ccoa-backend:ci
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=backend
+          cache-to: type=gha,mode=max,scope=backend
 
       - name: Verify durable replication
-        # The restore path fails silently: a container that never restores still boots,
-        # still passes both health checks, and still serves the corpus baked in at build
-        # time (ADR-007).
+        if: needs.changes.outputs.backend == 'true'
         working-directory: backend
         run: ./docker/verify-replication.sh ccoa-backend:ci
 
       - name: Build the frontend image
+        if: needs.changes.outputs.frontend == 'true'
         uses: docker/build-push-action@v7
         with:
           context: frontend
           push: false
           load: true
           tags: ccoa-frontend:ci
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=frontend
+          cache-to: type=gha,mode=max,scope=frontend
 
       - name: Verify what the image serves
-        # Headers and caching, asserted per location. An `add_header` inside a `location`
-        # discards every inherited one, so a CSP declared at server level can reach
-        # nothing while the config tests clean (docs/07 §3.9).
+        if: needs.changes.outputs.frontend == 'true'
         working-directory: frontend
         run: ./docker/verify-image.sh ccoa-frontend:ci
 
   terraform:
     name: Terraform
     runs-on: ubuntu-latest
+    needs: [changes]
+    if: needs.changes.outputs.terraform == 'true'
     steps:
       - uses: actions/checkout@v7
 
@@ -263,8 +283,8 @@ jobs:
 
       - name: Validate
         working-directory: terraform
-        # No credentials and no state: this validates the configuration, which is all a
-        # pull request can check without touching an account.
+        # `-backend=false`: this validates the configuration, which is all a pull request
+        # can check without touching an account.
         run: |
           terraform init -backend=false -input=false
           terraform validate
@@ -272,6 +292,8 @@ jobs:
   repository:
     name: Repository
     runs-on: ubuntu-latest
+    # No `if:` — these run on every change, including documentation-only ones. A secret
+    # or an account id is most often leaked in a document.
     steps:
       - uses: actions/checkout@v7
         with:
